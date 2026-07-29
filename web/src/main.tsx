@@ -130,7 +130,7 @@ if (!rootElement) {
       if (saved) {
         const s = JSON.parse(saved)
         if (s?.system_name) apply(s.system_name)
-        if (s?.logo) applyFaviconToDom(s.logo)
+        applyFaviconToDom(s?.logo || '/logo.png')
       }
     } catch {
       /* empty */
@@ -146,7 +146,7 @@ if (!rootElement) {
             /* empty */
           }
         }
-        if (s?.logo) applyFaviconToDom(s.logo as string)
+        applyFaviconToDom((s?.logo as string) || '/logo.png')
       })
       .catch(() => {
         /* empty */

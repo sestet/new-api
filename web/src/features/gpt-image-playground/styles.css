@@ -1,0 +1,135 @@
+.gpt-image-playground {
+  --safe-area-top: env(safe-area-inset-top, 0px);
+  --safe-area-right: env(safe-area-inset-right, 0px);
+  --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-area-left: env(safe-area-inset-left, 0px);
+}
+
+.gpt-image-playground .safe-area-top {
+  padding-top: var(--safe-area-top);
+}
+
+.gpt-image-playground .safe-area-x {
+  padding-left: max(1rem, var(--safe-area-left));
+  padding-right: max(1rem, var(--safe-area-right));
+}
+
+.gpt-image-playground .safe-header-inner {
+  min-height: 3.5rem;
+}
+
+.gpt-image-playground .hide-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.gpt-image-playground .hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.gpt-image-playground .saveable-image {
+  -webkit-touch-callout: default;
+  -webkit-user-select: auto;
+  user-select: auto;
+}
+
+.gpt-image-playground .mask-edge-r {
+  -webkit-mask-image: linear-gradient(to right, black 85%, transparent 100%);
+  mask-image: linear-gradient(to right, black 85%, transparent 100%);
+}
+
+.gpt-image-playground .ios-rounded-scroll-fix {
+  isolation: isolate;
+  -webkit-mask-image: -webkit-radial-gradient(white, black);
+}
+
+@keyframes gpt-playground-toast-enter {
+  from { transform: translate(-50%, 16px); opacity: 0; }
+  to { transform: translate(-50%, 0); opacity: 1; }
+}
+
+.gpt-image-playground .toast-enter {
+  animation: gpt-playground-toast-enter 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes gpt-playground-overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.gpt-image-playground .animate-overlay-in {
+  animation: gpt-playground-overlay-in 0.2s ease-out both;
+}
+
+@keyframes gpt-playground-modal-in {
+  from { opacity: 0; transform: scale(0.95) translateY(10px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.gpt-image-playground .animate-modal-in {
+  animation: gpt-playground-modal-in 0.25s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes gpt-playground-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.gpt-image-playground .animate-fade-in {
+  animation: gpt-playground-fade-in 0.2s ease-out both;
+}
+
+@keyframes gpt-playground-zoom-in {
+  from { opacity: 0; transform: scale(0.9); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.gpt-image-playground .animate-zoom-in {
+  animation: gpt-playground-zoom-in 0.25s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.gpt-image-playground .collapse-section {
+  display: grid;
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transition: grid-template-rows 0.25s ease-out, opacity 0.2s ease-out;
+}
+
+.gpt-image-playground .collapse-section.collapsed {
+  grid-template-rows: 0fr;
+  opacity: 0;
+}
+
+.gpt-image-playground .collapse-inner {
+  overflow: visible;
+}
+
+.gpt-image-playground .collapse-section.collapsed > .collapse-inner {
+  overflow: hidden;
+}
+
+.gpt-image-playground .markdown-renderer {
+  color: inherit;
+  line-height: inherit;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.gpt-image-playground .markdown-renderer :where(p, ul, ol, blockquote, table, pre, [data-streamdown='code-block']) {
+  margin-top: 0.65rem;
+  margin-bottom: 0.65rem;
+}
+
+.gpt-image-playground .markdown-renderer :where(p:first-child, ul:first-child, ol:first-child, blockquote:first-child, table:first-child, pre:first-child) {
+  margin-top: 0;
+}
+
+.gpt-image-playground .markdown-renderer :where(p:last-child, ul:last-child, ol:last-child, blockquote:last-child, table:last-child, pre:last-child) {
+  margin-bottom: 0;
+}
+
+@media (max-width: 640px) {
+  .gpt-image-playground .safe-area-top {
+    padding-top: max(0.5rem, var(--safe-area-top));
+  }
+}

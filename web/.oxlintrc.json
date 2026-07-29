@@ -18,6 +18,7 @@
     ".tanstack",
     ".eslintrc.cjs",
     "src/components/ui",
+    "src/features/gpt-image-playground/external",
     "src/routeTree.gen.ts"
   ],
   "rules": {

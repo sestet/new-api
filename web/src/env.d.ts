@@ -21,3 +21,6 @@ For commercial licensing, please contact support@quantumnous.com
 declare module '@visactor/react-vchart' {
   export const VChart: React.ComponentType<Record<string, unknown>>
 }
+
+declare const __APP_VERSION__: string
+declare const __DEV_PROXY_CONFIG__: unknown
