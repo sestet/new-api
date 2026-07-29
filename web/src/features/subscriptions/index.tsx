@@ -17,10 +17,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { Info } from 'lucide-react'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { SectionPageLayout } from '@/components/layout'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 import { SubscriptionsDialogs } from './components/subscriptions-dialogs'
 import { SubscriptionsPrimaryButtons } from './components/subscriptions-primary-buttons'
@@ -29,10 +31,12 @@ import {
   useSubscriptions,
 } from './components/subscriptions-provider'
 import { SubscriptionsTable } from './components/subscriptions-table'
+import { UserSubscriptionsTable } from './components/user-subscriptions-table'
 
 function SubscriptionsContent() {
   const { t } = useTranslation()
   const { complianceConfirmed } = useSubscriptions()
+  const [activeTab, setActiveTab] = useState<'users' | 'plans'>('users')
 
   return (
     <>
@@ -42,15 +46,17 @@ function SubscriptionsContent() {
         </SectionPageLayout.Title>
         <SectionPageLayout.Actions>
           <div className='flex items-center gap-2'>
-            <Alert variant='default' className='hidden px-3 py-2 sm:flex'>
-              <Info className='h-4 w-4' />
-              <AlertDescription className='text-xs'>
-                {t(
-                  'Stripe/Creem requires creating products on the third-party platform and entering the ID'
-                )}
-              </AlertDescription>
-            </Alert>
-            <SubscriptionsPrimaryButtons />
+            {activeTab === 'plans' ? (
+              <Alert variant='default' className='hidden px-3 py-2 sm:flex'>
+                <Info className='h-4 w-4' />
+                <AlertDescription className='text-xs'>
+                  {t(
+                    'Stripe/Creem requires creating products on the third-party platform and entering the ID'
+                  )}
+                </AlertDescription>
+              </Alert>
+            ) : null}
+            <SubscriptionsPrimaryButtons activeTab={activeTab} />
           </div>
         </SectionPageLayout.Actions>
         <SectionPageLayout.Content>
@@ -64,9 +70,28 @@ function SubscriptionsContent() {
                 </AlertDescription>
               </Alert>
             ) : null}
-            <div className='min-h-0 flex-1'>
-              <SubscriptionsTable />
-            </div>
+            <Tabs
+              value={activeTab}
+              onValueChange={(value) =>
+                setActiveTab(value as 'users' | 'plans')
+              }
+              className='min-h-0 flex-1'
+            >
+              <TabsList variant='line'>
+                <TabsTrigger value='users'>
+                  {t('Subscription Users')}
+                </TabsTrigger>
+                <TabsTrigger value='plans'>
+                  {t('Subscription Plans')}
+                </TabsTrigger>
+              </TabsList>
+              <TabsContent value='users' className='min-h-0'>
+                <UserSubscriptionsTable />
+              </TabsContent>
+              <TabsContent value='plans' className='min-h-0'>
+                <SubscriptionsTable />
+              </TabsContent>
+            </Tabs>
           </div>
         </SectionPageLayout.Content>
       </SectionPageLayout>

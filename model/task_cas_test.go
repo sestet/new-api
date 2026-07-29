@@ -52,13 +52,15 @@ func TestMain(m *testing.M) {
 		&SubscriptionPlan{},
 		&SubscriptionOrder{},
 		&UserSubscription{},
+		&SubscriptionPreConsumeRecord{},
 		&UserOAuthBinding{},
 		&PerfMetric{},
 		&SystemInstance{},
 		&SystemTask{},
 		&SystemTaskLock{},
+		&UpstreamBillingRecord{},
 	); err != nil {
-		panic("failed to migrate: " + err.Error())
+		panic("failed to initialize test schema: " + err.Error())
 	}
 
 	os.Exit(m.Run())
@@ -85,6 +87,7 @@ func truncateTables(t *testing.T) {
 		DB.Exec("DELETE FROM subscription_orders")
 		DB.Exec("DELETE FROM subscription_plans")
 		DB.Exec("DELETE FROM user_subscriptions")
+		DB.Exec("DELETE FROM subscription_pre_consume_records")
 		DB.Exec("DELETE FROM perf_metrics")
 		DB.Exec("DELETE FROM system_instances")
 		DB.Exec("DELETE FROM system_task_locks")

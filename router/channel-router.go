@@ -76,4 +76,11 @@ var channelPermissionRoutes = []permissionRoute{
 	{method: http.MethodPost, path: "/upstream_updates/apply_all", permission: authz.ChannelWrite, handler: controller.ApplyAllChannelUpstreamModelUpdates},
 	{method: http.MethodPost, path: "/upstream_updates/detect", permission: authz.ChannelOperate, handler: controller.DetectChannelUpstreamModelUpdates},
 	{method: http.MethodPost, path: "/upstream_updates/detect_all", permission: authz.ChannelOperate, handler: controller.DetectAllChannelUpstreamModelUpdates},
+	{method: http.MethodPost, path: "/upstream_billing/detect", permission: authz.ChannelSensitiveWrite, handler: controller.DetectChannelUpstreamBilling},
+	{method: http.MethodGet, path: "/upstream_billing/accounts", permission: authz.ChannelRead, handler: controller.ListUpstreamBillingAccounts},
+	{method: http.MethodPost, path: "/upstream_billing/accounts", permission: authz.ChannelSensitiveWrite, handler: controller.CreateUpstreamBillingAccount},
+	{method: http.MethodPut, path: "/upstream_billing/accounts/:id", permission: authz.ChannelSensitiveWrite, handler: controller.UpdateUpstreamBillingAccount},
+	{method: http.MethodDelete, path: "/upstream_billing/accounts/:id", permission: authz.ChannelSensitiveWrite, handler: controller.DeleteUpstreamBillingAccount},
+	{method: http.MethodPost, path: "/upstream_billing/accounts/:id/test", permission: authz.ChannelSensitiveWrite, handler: controller.TestUpstreamBillingAccount},
+	{method: http.MethodPost, path: "/upstream_billing/accounts/:id/reconcile", permission: authz.ChannelSensitiveWrite, handler: controller.ReconcileUpstreamBillingAccount},
 }

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
@@ -185,6 +186,10 @@ func AdminCreateSubscriptionPlan(c *gin.Context) {
 		common.ApiErrorMsg(c, "总额度不能为负数")
 		return
 	}
+	if req.Plan.TotalAmount > common.MaxQuota {
+		common.ApiErrorI18n(c, i18n.MsgQuotaExceedMax)
+		return
+	}
 	req.Plan.UpgradeGroup = strings.TrimSpace(req.Plan.UpgradeGroup)
 	if req.Plan.UpgradeGroup != "" {
 		if _, ok := ratio_setting.GetGroupRatioCopy()[req.Plan.UpgradeGroup]; !ok {
@@ -257,6 +262,10 @@ func AdminUpdateSubscriptionPlan(c *gin.Context) {
 	}
 	if req.Plan.TotalAmount < 0 {
 		common.ApiErrorMsg(c, "总额度不能为负数")
+		return
+	}
+	if req.Plan.TotalAmount > common.MaxQuota {
+		common.ApiErrorI18n(c, i18n.MsgQuotaExceedMax)
 		return
 	}
 	req.Plan.UpgradeGroup = strings.TrimSpace(req.Plan.UpgradeGroup)
@@ -376,6 +385,25 @@ func AdminBindSubscription(c *gin.Context) {
 }
 
 // ---- Admin: user subscription management ----
+
+func AdminSearchUserSubscriptions(c *gin.Context) {
+	pageInfo := common.GetPageQuery(c)
+	planId, _ := strconv.Atoi(c.Query("plan_id"))
+	items, total, err := model.SearchAdminUserSubscriptions(
+		c.Query("keyword"),
+		planId,
+		c.Query("status"),
+		pageInfo.GetStartIdx(),
+		pageInfo.GetPageSize(),
+	)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	pageInfo.SetTotal(int(total))
+	pageInfo.SetItems(items)
+	common.ApiSuccess(c, pageInfo)
+}
 
 func AdminListUserSubscriptions(c *gin.Context) {
 	userId, _ := strconv.Atoi(c.Param("id"))

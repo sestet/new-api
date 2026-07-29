@@ -1,37 +1,21 @@
 package setting
 
-import (
-	"github.com/QuantumNous/new-api/common"
-)
-
-var autoGroups = []string{
-	"default",
-}
-
 var DefaultUseAutoGroup = false
 
 func ContainsAutoGroup(group string) bool {
-	for _, autoGroup := range autoGroups {
-		if autoGroup == group {
-			return true
-		}
-	}
-	return false
+	return group == "default"
 }
 
-func UpdateAutoGroupsByJsonString(jsonString string) error {
-	autoGroups = make([]string, 0)
-	return common.Unmarshal([]byte(jsonString), &autoGroups)
+// UpdateAutoGroupsByJsonString remains for compatibility with old option rows.
+// Automatic selection always uses the default group.
+func UpdateAutoGroupsByJsonString(_ string) error {
+	return nil
 }
 
 func AutoGroups2JsonString() string {
-	jsonBytes, err := common.Marshal(autoGroups)
-	if err != nil {
-		return "[]"
-	}
-	return string(jsonBytes)
+	return `["default"]`
 }
 
 func GetAutoGroups() []string {
-	return autoGroups
+	return []string{"default"}
 }

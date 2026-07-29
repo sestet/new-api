@@ -158,7 +158,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 	// common.SetContextKey(c, constant.ContextKeyTokenCountMeta, meta)
 
-	if priceData.FreeModel {
+	if priceData.FreeModel && !helper.ShouldUseUpstreamBillingReconciliation(c, relayInfo) {
 		logger.LogInfo(c, fmt.Sprintf("模型 %s 免费，跳过预扣费", relayInfo.OriginModelName))
 	} else {
 		newAPIError = service.PreConsumeBilling(c, priceData.QuotaToPreConsume, relayInfo)
@@ -198,6 +198,35 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 
 		addUsedChannel(c, channel.Id)
+		relayInfo.InitChannelMeta(c)
+		finalPriceData, priceErr := helper.ModelPriceHelper(c, relayInfo, tokens, meta)
+		if priceErr != nil {
+			newAPIError = types.NewError(priceErr, types.ErrorCodeModelPriceError, types.ErrOptionWithStatusCode(http.StatusBadRequest), types.ErrOptionWithSkipRetry())
+			break
+		}
+		if !finalPriceData.FreeModel || helper.ShouldUseUpstreamBillingReconciliation(c, relayInfo) {
+			if relayInfo.Billing == nil {
+				newAPIError = service.PreConsumeBilling(c, finalPriceData.QuotaToPreConsume, relayInfo)
+				if newAPIError != nil {
+					break
+				}
+			} else if reserveErr := relayInfo.Billing.Reserve(finalPriceData.QuotaToPreConsume); reserveErr != nil {
+				var reserveAPIError *types.NewAPIError
+				if errors.As(reserveErr, &reserveAPIError) {
+					newAPIError = reserveAPIError
+				} else {
+					newAPIError = types.NewError(reserveErr, types.ErrorCodeUpdateDataError, types.ErrOptionWithSkipRetry())
+				}
+				break
+			}
+		}
+		c.Set(common.UpstreamRequestIdKey, "")
+		c.Set(common.UpstreamBillingRequestIdKey, "")
+		if helper.ShouldUseUpstreamBillingReconciliation(c, relayInfo) {
+			upstreamBillingRequestID := common.NewRequestId()
+			c.Set(common.UpstreamRequestIdKey, upstreamBillingRequestID)
+			c.Set(common.UpstreamBillingRequestIdKey, upstreamBillingRequestID)
+		}
 		bodyStorage, bodyErr := common.GetBodyStorage(c)
 		if bodyErr != nil {
 			// Ensure consistent 413 for oversized bodies even when error occurs later (e.g., retry path)
@@ -305,8 +334,6 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 		}, nil
 	}
 	channel, selectGroup, err := service.CacheGetRandomSatisfiedChannel(retryParam)
-
-	info.PriceData.GroupRatioInfo = helper.HandleGroupRatio(c, info)
 
 	if err != nil {
 		return nil, types.NewError(fmt.Errorf("获取分组 %s 下模型 %s 的可用渠道失败（retry）: %s", selectGroup, info.OriginModelName, err.Error()), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
@@ -585,12 +612,15 @@ func RelayTask(c *gin.Context) {
 		task.PrivateData.TokenId = relayInfo.TokenId
 		task.PrivateData.NodeName = common.NodeName
 		task.PrivateData.BillingContext = &model.TaskBillingContext{
-			ModelPrice:      relayInfo.PriceData.ModelPrice,
-			GroupRatio:      relayInfo.PriceData.GroupRatioInfo.GroupRatio,
-			ModelRatio:      relayInfo.PriceData.ModelRatio,
-			OtherRatios:     relayInfo.PriceData.OtherRatios(),
-			OriginModelName: relayInfo.OriginModelName,
-			PerCallBilling:  common.StringsContains(constant.TaskPricePatches, relayInfo.OriginModelName) || relayInfo.PriceData.UsePrice,
+			ModelPrice:       relayInfo.PriceData.ModelPrice,
+			UserGroup:        relayInfo.UserGroup,
+			UsingGroup:       relayInfo.UsingGroup,
+			GroupRatio:       relayInfo.PriceData.BillingGroupRatio(),
+			GroupRatioSource: relayInfo.PriceData.GroupRatioInfo.Source,
+			ModelRatio:       relayInfo.PriceData.ModelRatio,
+			OtherRatios:      relayInfo.PriceData.OtherRatios(),
+			OriginModelName:  relayInfo.OriginModelName,
+			PerCallBilling:   common.StringsContains(constant.TaskPricePatches, relayInfo.OriginModelName) || relayInfo.PriceData.UsePrice,
 		}
 		task.Quota = result.Quota
 		task.Data = result.TaskData

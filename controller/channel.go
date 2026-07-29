@@ -69,6 +69,59 @@ func clearChannelInfo(channel *model.Channel) {
 		channel.ChannelInfo.MultiKeyDisabledReason = nil
 		channel.ChannelInfo.MultiKeyDisabledTime = nil
 	}
+	settings := channel.GetOtherSettings()
+	credentialsMasked := false
+	if settings.UpstreamBilling != nil && settings.UpstreamBilling.AccessToken != "" {
+		settings.UpstreamBilling.AccessToken = ""
+		settings.UpstreamBilling.AccessTokenConfigured = true
+		credentialsMasked = true
+	}
+	if settings.UpstreamBilling != nil && settings.UpstreamBilling.RefreshToken != "" {
+		settings.UpstreamBilling.RefreshToken = ""
+		settings.UpstreamBilling.RefreshTokenConfigured = true
+		credentialsMasked = true
+	}
+	if credentialsMasked {
+		channel.SetOtherSettings(settings)
+	}
+}
+
+func preserveUpstreamBillingCredentials(channel *model.Channel, originChannel *model.Channel) {
+	if channel == nil || originChannel == nil {
+		return
+	}
+	requestedSettings := channel.GetOtherSettings()
+	originSettings := originChannel.GetOtherSettings()
+	if requestedSettings.UpstreamBilling == nil || originSettings.UpstreamBilling == nil {
+		return
+	}
+	if requestedSettings.UpstreamBilling.AccessTokenConfigured && requestedSettings.UpstreamBilling.AccessToken == "" && originSettings.UpstreamBilling.AccessToken != "" {
+		requestedSettings.UpstreamBilling.AccessToken = originSettings.UpstreamBilling.AccessToken
+		requestedSettings.UpstreamBilling.AccessTokenConfigured = false
+	}
+	if requestedSettings.UpstreamBilling.RefreshTokenConfigured && requestedSettings.UpstreamBilling.RefreshToken == "" && originSettings.UpstreamBilling.RefreshToken != "" {
+		requestedSettings.UpstreamBilling.RefreshToken = originSettings.UpstreamBilling.RefreshToken
+		requestedSettings.UpstreamBilling.RefreshTokenConfigured = false
+	}
+	channel.SetOtherSettings(requestedSettings)
+}
+
+func attachUpstreamBillingStats(channels []*model.Channel) error {
+	stats, err := model.GetUpstreamBillingStats()
+	if err != nil {
+		return err
+	}
+	statsByChannel := make(map[int]*model.UpstreamBillingChannelStats, len(stats.Channels))
+	for index := range stats.Channels {
+		channelStats := &stats.Channels[index]
+		statsByChannel[channelStats.ChannelId] = channelStats
+	}
+	for _, channel := range channels {
+		if channel != nil {
+			channel.UpstreamBillingStats = statsByChannel[channel.Id]
+		}
+	}
+	return nil
 }
 
 func applyChannelStatusFilter(query *gorm.DB, statusFilter int) *gorm.DB {
@@ -92,8 +145,13 @@ func buildChannelListQuery(group string, statusFilter int, typeFilter int) *gorm
 }
 
 func GetChannelOps(c *gin.Context) {
+	upstreamBillingStats, err := model.GetUpstreamBillingStats()
+	if err != nil {
+		common.SysError("failed to get upstream billing stats: " + err.Error())
+	}
 	common.ApiSuccess(c, gin.H{
-		"retry_times": common.RetryTimes,
+		"retry_times":            common.RetryTimes,
+		"upstream_billing_stats": upstreamBillingStats,
 	})
 }
 
@@ -165,6 +223,9 @@ func GetAllChannels(c *gin.Context) {
 		}
 	}
 
+	if statsErr := attachUpstreamBillingStats(channelData); statsErr != nil {
+		common.SysError("failed to get channel upstream billing stats: " + statsErr.Error())
+	}
 	for _, datum := range channelData {
 		clearChannelInfo(datum)
 	}
@@ -378,6 +439,9 @@ func SearchChannels(c *gin.Context) {
 
 	pagedData := channelData[startIdx:endIdx]
 
+	if statsErr := attachUpstreamBillingStats(pagedData); statsErr != nil {
+		common.SysError("failed to get searched channel upstream billing stats: " + statsErr.Error())
+	}
 	for _, datum := range pagedData {
 		clearChannelInfo(datum)
 	}
@@ -406,6 +470,9 @@ func GetChannel(c *gin.Context) {
 		return
 	}
 	if channel != nil {
+		if statsErr := attachUpstreamBillingStats([]*model.Channel{channel}); statsErr != nil {
+			common.SysError("failed to get channel upstream billing stats: " + statsErr.Error())
+		}
 		clearChannelInfo(channel)
 	}
 	c.JSON(http.StatusOK, gin.H{
@@ -959,6 +1026,15 @@ func UpdateChannel(c *gin.Context) {
 		return
 	}
 	clearChannelReadOnlyFields(&channel, requestData)
+	originChannel, err := model.GetChannelById(channel.Id, true)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": err.Error(),
+		})
+		return
+	}
+	preserveUpstreamBillingCredentials(&channel.Channel, originChannel)
 
 	// 使用统一的校验函数
 	if err := validateChannel(&channel.Channel, false); err != nil {
@@ -969,14 +1045,6 @@ func UpdateChannel(c *gin.Context) {
 		return
 	}
 	// Preserve existing ChannelInfo to ensure multi-key channels keep correct state even if the client does not send ChannelInfo in the request.
-	originChannel, err := model.GetChannelById(channel.Id, true)
-	if err != nil {
-		c.JSON(http.StatusOK, gin.H{
-			"success": false,
-			"message": err.Error(),
-		})
-		return
-	}
 	originProxy := originChannel.GetSetting().Proxy
 	proxyChanged := false
 	if _, settingProvided := requestData["setting"]; settingProvided {

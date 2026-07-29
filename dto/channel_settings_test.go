@@ -3,11 +3,137 @@ package dto
 import (
 	"regexp"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestUpstreamBillingSettingsValidateRejectsUnknownDetectedProvider(t *testing.T) {
+	settings := &UpstreamBillingSettings{
+		Enabled:          true,
+		Provider:         UpstreamBillingProviderAuto,
+		AccessToken:      "token",
+		DetectedProvider: UpstreamBillingProvider("unknown"),
+	}
+
+	err := settings.Validate()
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported detected upstream billing provider")
+}
+
+func TestUpstreamBillingSettingsValidateRejectsURLCredentials(t *testing.T) {
+	settings := &UpstreamBillingSettings{
+		Enabled:     true,
+		Provider:    UpstreamBillingProviderNewAPI,
+		AccessToken: "token",
+		APIBaseURL:  "https://user:password@example.com",
+	}
+
+	err := settings.Validate()
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid upstream billing API base URL")
+}
+
+func TestUpstreamBillingSettingsValidateRejectsNegativeUserID(t *testing.T) {
+	settings := &UpstreamBillingSettings{
+		Enabled:     true,
+		Provider:    UpstreamBillingProviderNewAPI,
+		AccessToken: "token",
+		UserID:      -1,
+	}
+
+	err := settings.Validate()
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "user ID cannot be negative")
+}
+
+func TestUpstreamBillingSettingsRecheckDefaultsAndValidation(t *testing.T) {
+	settings := &UpstreamBillingSettings{}
+	assert.True(t, settings.IsRecheckEnabled())
+	assert.Equal(t, 24*time.Hour, settings.RecheckWindow())
+
+	disabled := false
+	settings.RecheckEnabled = &disabled
+	assert.False(t, settings.IsRecheckEnabled())
+
+	settings.Enabled = true
+	settings.AccessToken = "token"
+	settings.RecheckWindowHours = 721
+	err := settings.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "recheck window")
+}
+
+func TestUpstreamBillingSettingsValidateSharedCredentialRecheckWindow(t *testing.T) {
+	settings := &UpstreamBillingSettings{
+		CredentialID:       12,
+		Enabled:            true,
+		RecheckWindowHours: 721,
+	}
+
+	err := settings.Validate()
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "recheck window")
+}
+
+func TestUpstreamBillingSettingsValidateUsesProviderCredential(t *testing.T) {
+	tests := []struct {
+		name     string
+		settings UpstreamBillingSettings
+		wantErr  string
+	}{
+		{
+			name: "new-api accepts access token",
+			settings: UpstreamBillingSettings{
+				Enabled: true, Provider: UpstreamBillingProviderNewAPI, AccessToken: "access",
+			},
+		},
+		{
+			name: "sub2api accepts refresh token without access token",
+			settings: UpstreamBillingSettings{
+				Enabled: true, Provider: UpstreamBillingProviderSub2API, RefreshToken: "refresh",
+			},
+		},
+		{
+			name: "sub2api requires refresh credential",
+			settings: UpstreamBillingSettings{
+				Enabled: true, Provider: UpstreamBillingProviderSub2API,
+			},
+			wantErr: "sub2api refresh token is required",
+		},
+	}
+
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			err := testCase.settings.Validate()
+			if testCase.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), testCase.wantErr)
+		})
+	}
+}
+
+func TestUpstreamBillingSettingsValidateRecognizesSub2APIRefreshToken(t *testing.T) {
+	settings := UpstreamBillingSettings{
+		Enabled:     true,
+		Provider:    UpstreamBillingProviderAuto,
+		AccessToken: "rt_refresh-token",
+	}
+
+	require.NoError(t, settings.Validate())
+	assert.Empty(t, settings.AccessToken)
+	assert.Equal(t, "rt_refresh-token", settings.RefreshToken)
+	assert.Equal(t, UpstreamBillingProviderSub2API, settings.DetectedProvider)
+}
 
 func TestAdvancedCustomValidateResponsesToChatConverterPath(t *testing.T) {
 	valid := &AdvancedCustomConfig{

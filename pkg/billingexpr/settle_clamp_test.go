@@ -1,7 +1,6 @@
 package billingexpr_test
 
 import (
-	"math"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -11,7 +10,7 @@ import (
 )
 
 // TestComputeTieredQuota_ClampOnOverflow guards the billing-safety invariant
-// that an oversized tiered settlement clamps to the int32 max instead of
+// that an oversized tiered settlement clamps to the API-safe max instead of
 // wrapping into a credit, and that the saturation event is surfaced on the
 // result so callers can record it for admin auditing.
 func TestComputeTieredQuota_ClampOnOverflow(t *testing.T) {
@@ -22,17 +21,16 @@ func TestComputeTieredQuota_ClampOnOverflow(t *testing.T) {
 		BillingMode:  "tiered_expr",
 		ExprString:   exprStr,
 		ExprHash:     billingexpr.ExprHashString(exprStr),
-		GroupRatio:   1.0,
 		QuotaPerUnit: 500_000,
 	}
 
 	result, err := billingexpr.ComputeTieredQuota(snap, billingexpr.TokenParams{P: 1_000_000_000})
 	require.NoError(t, err)
 
-	assert.Equal(t, math.MaxInt32, result.ActualQuotaAfterGroup, "oversized quota must clamp to int32 max, never wrap negative")
+	assert.Equal(t, common.MaxQuota, result.ActualQuota, "oversized quota must clamp to the API-safe maximum, never wrap negative")
 	require.NotNil(t, result.Clamp, "clamp event must be surfaced so it can be audited")
 	assert.Equal(t, common.QuotaClampOverflow, result.Clamp.Kind)
-	assert.Equal(t, math.MaxInt32, result.Clamp.Clamped)
+	assert.Equal(t, common.MaxQuota, result.Clamp.Clamped)
 }
 
 // TestComputeTieredQuota_NoClampInRange confirms an in-range settlement leaves
@@ -43,7 +41,6 @@ func TestComputeTieredQuota_NoClampInRange(t *testing.T) {
 		BillingMode:  "tiered_expr",
 		ExprString:   exprStr,
 		ExprHash:     billingexpr.ExprHashString(exprStr),
-		GroupRatio:   1.0,
 		QuotaPerUnit: 500_000,
 	}
 

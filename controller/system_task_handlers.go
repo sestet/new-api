@@ -22,6 +22,8 @@ func RegisterScheduledSystemTasks() {
 	service.RegisterSystemTaskHandler(modelUpdateHandler{})
 	service.RegisterSystemTaskHandler(midjourneyPollHandler{})
 	service.RegisterSystemTaskHandler(asyncTaskPollHandler{})
+	service.RegisterSystemTaskHandler(upstreamBillingReconcileHandler{})
+	service.RegisterSystemTaskHandler(sub2APITokenRefreshHandler{})
 }
 
 // channelTestHandler runs the scheduled "test all channels" job. Enablement and
@@ -150,6 +152,83 @@ func (asyncTaskPollHandler) NewPayload() any { return nil }
 func (asyncTaskPollHandler) Run(ctx context.Context, task *model.SystemTask, runnerID string) {
 	summary := service.RunTaskPollingOnce(ctx, service.NewSystemTaskProgressReporter(task, runnerID))
 	finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusSucceeded, summary, nil)
+}
+
+type upstreamBillingReconcileHandler struct{}
+
+type upstreamBillingReconcileTaskPayload struct {
+	CredentialID int `json:"credential_id,omitempty"`
+}
+
+func (upstreamBillingReconcileHandler) Type() string {
+	return model.SystemTaskTypeUpstreamBillingReconcile
+}
+
+func (upstreamBillingReconcileHandler) Enabled() bool {
+	if !common.GetEnvOrDefaultBool("UPSTREAM_BILLING_RECONCILE_TASK_ENABLED", true) {
+		return false
+	}
+	createdAfter := common.GetTimestamp() - int64(service.UpstreamBillingReconcileLookback().Seconds())
+	return model.HasUpstreamBillingReconcileWork(createdAfter)
+}
+
+func (upstreamBillingReconcileHandler) Interval() time.Duration {
+	minutes := common.GetEnvOrDefault("UPSTREAM_BILLING_RECONCILE_TASK_INTERVAL_MINUTES", 1)
+	if minutes < 1 {
+		minutes = 1
+	}
+	return time.Duration(minutes) * time.Minute
+}
+
+func (upstreamBillingReconcileHandler) NewPayload() any { return nil }
+
+func (upstreamBillingReconcileHandler) Run(ctx context.Context, task *model.SystemTask, runnerID string) {
+	payload := upstreamBillingReconcileTaskPayload{}
+	if err := task.DecodePayload(&payload); err != nil {
+		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, nil, err)
+		return
+	}
+	var summary service.UpstreamBillingReconcileSummary
+	if payload.CredentialID > 0 {
+		summary = service.RunUpstreamBillingReconcileForCredential(ctx, payload.CredentialID, 200, 0)
+	} else {
+		summary = service.RunUpstreamBillingReconcile(ctx, 0, 0)
+	}
+	finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusSucceeded, summary, nil)
+}
+
+type sub2APITokenRefreshHandler struct{}
+
+func (sub2APITokenRefreshHandler) Type() string {
+	return model.SystemTaskTypeSub2APITokenRefresh
+}
+
+func (sub2APITokenRefreshHandler) Enabled() bool {
+	if !common.GetEnvOrDefaultBool("SUB2API_TOKEN_REFRESH_TASK_ENABLED", true) {
+		return false
+	}
+	return service.HasSub2APICredentialRefreshWork()
+}
+
+func (sub2APITokenRefreshHandler) Interval() time.Duration {
+	minutes := common.GetEnvOrDefault("SUB2API_TOKEN_REFRESH_TASK_INTERVAL_MINUTES", 15)
+	if minutes < 1 {
+		minutes = 15
+	}
+	return time.Duration(minutes) * time.Minute
+}
+
+func (sub2APITokenRefreshHandler) NewPayload() any { return nil }
+
+func (sub2APITokenRefreshHandler) Run(ctx context.Context, task *model.SystemTask, runnerID string) {
+	summary := service.RefreshDueSub2APICredentials(ctx)
+	status := model.SystemTaskStatusSucceeded
+	var runErr error
+	if summary.Failed > 0 && summary.Refreshed == 0 {
+		status = model.SystemTaskStatusFailed
+		runErr = fmt.Errorf("failed to refresh %d sub2api billing credentials", summary.Failed)
+	}
+	finishSystemTaskHandler(task, runnerID, status, summary, runErr)
 }
 
 func finishSystemTaskHandler(task *model.SystemTask, runnerID string, status model.SystemTaskStatus, result any, runErr error) {

@@ -17,10 +17,22 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { createFileRoute, redirect } from '@tanstack/react-router'
+import z from 'zod'
 
 import { Subscriptions } from '@/features/subscriptions'
 import { ROLE } from '@/lib/roles'
 import { useAuthStore } from '@/stores/auth-store'
+
+const subscriptionsSearchSchema = z.object({
+  page: z.number().optional().catch(1),
+  pageSize: z.number().optional().catch(20),
+  filter: z.string().optional().catch(''),
+  status: z
+    .array(z.enum(['active', 'expired', 'cancelled']))
+    .optional()
+    .catch([]),
+  plan: z.array(z.string()).optional().catch([]),
+})
 
 export const Route = createFileRoute('/_authenticated/subscriptions/')({
   beforeLoad: () => {
@@ -29,5 +41,6 @@ export const Route = createFileRoute('/_authenticated/subscriptions/')({
       throw redirect({ to: '/403' })
     }
   },
+  validateSearch: subscriptionsSearchSchema,
   component: Subscriptions,
 })

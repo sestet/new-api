@@ -65,7 +65,7 @@ type Log struct {
 	Username          string `json:"username" gorm:"index;index:index_username_model_name,priority:2;default:''"`
 	TokenName         string `json:"token_name" gorm:"index;default:''"`
 	ModelName         string `json:"model_name" gorm:"index;index:index_username_model_name,priority:1;default:''"`
-	Quota             int    `json:"quota" gorm:"default:0"`
+	Quota             int64  `json:"quota" gorm:"type:bigint;default:0"`
 	PromptTokens      int    `json:"prompt_tokens" gorm:"default:0"`
 	CompletionTokens  int    `json:"completion_tokens" gorm:"default:0"`
 	UseTime           int    `json:"use_time" gorm:"default:0"`
@@ -331,7 +331,7 @@ type RecordConsumeLogParams struct {
 	CompletionTokens int                    `json:"completion_tokens"`
 	ModelName        string                 `json:"model_name"`
 	TokenName        string                 `json:"token_name"`
-	Quota            int                    `json:"quota"`
+	Quota            int64                  `json:"quota"`
 	Content          string                 `json:"content"`
 	TokenId          int                    `json:"token_id"`
 	UseTimeSeconds   int                    `json:"use_time_seconds"`
@@ -403,13 +403,47 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 	}
 }
 
+func GetConsumeLogByRequestId(requestId string, userId int) (*Log, error) {
+	if strings.TrimSpace(requestId) == "" {
+		return nil, errors.New("request ID is required")
+	}
+	var logEntry Log
+	err := LOG_DB.Where("request_id = ? AND user_id = ? AND type = ?", requestId, userId, LogTypeConsume).
+		Order(clickHouseLogOrder("")).
+		First(&logEntry).Error
+	if err != nil {
+		return nil, err
+	}
+	return &logEntry, nil
+}
+
+func UpdateConsumeLogUpstreamBilling(requestId string, userId int, upstreamRequestId string, quota int64, other string) error {
+	if strings.TrimSpace(requestId) == "" {
+		return errors.New("request ID is required")
+	}
+	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
+		return LOG_DB.Exec(
+			"ALTER TABLE logs UPDATE upstream_request_id = ?, quota = ?, other = ? WHERE request_id = ? AND user_id = ? AND type = ?",
+			upstreamRequestId,
+			quota,
+			other,
+			requestId,
+			userId,
+			LogTypeConsume,
+		).Error
+	}
+	return LOG_DB.Model(&Log{}).
+		Where("request_id = ? AND user_id = ? AND type = ?", requestId, userId, LogTypeConsume).
+		Updates(map[string]interface{}{"upstream_request_id": upstreamRequestId, "quota": quota, "other": other}).Error
+}
+
 type RecordTaskBillingLogParams struct {
 	UserId    int
 	LogType   int
 	Content   string
 	ChannelId int
 	ModelName string
-	Quota     int
+	Quota     int64
 	TokenId   int
 	Group     string
 	Other     map[string]interface{}
@@ -465,7 +499,7 @@ func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
 	}
 }
 
-func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, startIdx int, num int, channel int, group string, requestId string, upstreamRequestId string) (logs []*Log, total int64, err error) {
+func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, startIdx int, num int, channel int, group string, requestId string, upstreamRequestId string, billingStatus string) (logs []*Log, total int64, err error) {
 	var tx *gorm.DB
 	if logType == LogTypeUnknown {
 		tx = LOG_DB
@@ -499,6 +533,9 @@ func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName
 	}
 	if group != "" {
 		tx = tx.Where("logs."+logGroupCol+" = ?", group)
+	}
+	if tx, err = applyUpstreamBillingStatusFilter(tx, "logs.", billingStatus); err != nil {
+		return nil, 0, err
 	}
 	err = tx.Model(&Log{}).Count(&total).Error
 	if err != nil {
@@ -561,7 +598,7 @@ func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName
 
 const logSearchCountLimit = 10000
 
-func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int64, modelName string, tokenName string, startIdx int, num int, group string, requestId string, upstreamRequestId string) (logs []*Log, total int64, err error) {
+func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int64, modelName string, tokenName string, startIdx int, num int, group string, requestId string, upstreamRequestId string, billingStatus string) (logs []*Log, total int64, err error) {
 	var tx *gorm.DB
 	if logType == LogTypeUnknown {
 		tx = LOG_DB.Where("logs.user_id = ?", userId)
@@ -590,6 +627,9 @@ func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int
 	if group != "" {
 		tx = tx.Where("logs."+logGroupCol+" = ?", group)
 	}
+	if tx, err = applyUpstreamBillingStatusFilter(tx, "logs.", billingStatus); err != nil {
+		return nil, 0, err
+	}
 	err = tx.Model(&Log{}).Limit(logSearchCountLimit).Count(&total).Error
 	if err != nil {
 		common.SysError("failed to count user logs: " + err.Error())
@@ -610,13 +650,55 @@ func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int
 }
 
 type Stat struct {
-	Quota int `json:"quota"`
-	Rpm   int `json:"rpm"`
-	Tpm   int `json:"tpm"`
+	Quota        int64 `json:"quota"`
+	Rpm          int   `json:"rpm"`
+	Tpm          int   `json:"tpm"`
+	RequestCount int64 `json:"request_count"`
+	Exact        int64 `json:"exact"`
+	Estimated    int64 `json:"estimated"`
+	Pending      int64 `json:"pending"`
+	Failed       int64 `json:"failed"`
 }
 
-func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, channel int, group string) (stat Stat, err error) {
-	tx := LOG_DB.Table("logs").Select("COALESCE(sum(quota), 0) quota")
+func upstreamBillingStatusPattern(status string) string {
+	return `%"upstream_billing_status":"` + status + `"%`
+}
+
+func applyUpstreamBillingStatusFilter(tx *gorm.DB, columnPrefix string, status string) (*gorm.DB, error) {
+	status = strings.TrimSpace(status)
+	if status == "" || status == "all" {
+		return tx, nil
+	}
+	column := columnPrefix + "other"
+	if status == "waiting" {
+		return tx.Where(
+			"("+column+" LIKE ? OR "+column+" LIKE ?)",
+			upstreamBillingStatusPattern(UpstreamBillingStatusEstimated),
+			upstreamBillingStatusPattern(UpstreamBillingStatusPending),
+		), nil
+	}
+	if status != UpstreamBillingStatusExact &&
+		status != UpstreamBillingStatusEstimated &&
+		status != UpstreamBillingStatusPending &&
+		status != UpstreamBillingStatusFailed {
+		return nil, errors.New("invalid upstream billing status filter")
+	}
+	return tx.Where(column+" LIKE ?", upstreamBillingStatusPattern(status)), nil
+}
+
+func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, channel int, group string, requestId string, upstreamRequestId string, billingStatus string) (stat Stat, err error) {
+	tx := LOG_DB.Table("logs").Select(`
+		COALESCE(sum(quota), 0) quota,
+		count(*) request_count,
+		COALESCE(sum(CASE WHEN other LIKE ? THEN 1 ELSE 0 END), 0) exact,
+		COALESCE(sum(CASE WHEN other LIKE ? THEN 1 ELSE 0 END), 0) estimated,
+		COALESCE(sum(CASE WHEN other LIKE ? THEN 1 ELSE 0 END), 0) pending,
+		COALESCE(sum(CASE WHEN other LIKE ? THEN 1 ELSE 0 END), 0) failed`,
+		upstreamBillingStatusPattern(UpstreamBillingStatusExact),
+		upstreamBillingStatusPattern(UpstreamBillingStatusEstimated),
+		upstreamBillingStatusPattern(UpstreamBillingStatusPending),
+		upstreamBillingStatusPattern(UpstreamBillingStatusFailed),
+	)
 
 	// 为rpm和tpm创建单独的查询
 	rpmTpmQuery := LOG_DB.Table("logs").Select("count(*) rpm, COALESCE(sum(prompt_tokens), 0) + COALESCE(sum(completion_tokens), 0) tpm")
@@ -630,6 +712,14 @@ func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelNa
 	if tokenName != "" {
 		tx = tx.Where("token_name = ?", tokenName)
 		rpmTpmQuery = rpmTpmQuery.Where("token_name = ?", tokenName)
+	}
+	if requestId != "" {
+		tx = tx.Where("request_id = ?", requestId)
+		rpmTpmQuery = rpmTpmQuery.Where("request_id = ?", requestId)
+	}
+	if upstreamRequestId != "" {
+		tx = tx.Where("upstream_request_id = ?", upstreamRequestId)
+		rpmTpmQuery = rpmTpmQuery.Where("upstream_request_id = ?", upstreamRequestId)
 	}
 	if startTimestamp != 0 {
 		tx = tx.Where("created_at >= ?", startTimestamp)
@@ -650,6 +740,12 @@ func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelNa
 	if group != "" {
 		tx = tx.Where(logGroupCol+" = ?", group)
 		rpmTpmQuery = rpmTpmQuery.Where(logGroupCol+" = ?", group)
+	}
+	if tx, err = applyUpstreamBillingStatusFilter(tx, "", billingStatus); err != nil {
+		return stat, err
+	}
+	if rpmTpmQuery, err = applyUpstreamBillingStatusFilter(rpmTpmQuery, "", billingStatus); err != nil {
+		return stat, err
 	}
 
 	tx = tx.Where("type = ?", LogTypeConsume)

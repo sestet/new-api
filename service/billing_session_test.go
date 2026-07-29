@@ -1,0 +1,113 @@
+package service
+
+import (
+	"net/http"
+	"testing"
+
+	"github.com/QuantumNous/new-api/model"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/types"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestBillingSessionReserveRejectsInsufficientWalletQuota(t *testing.T) {
+	truncate(t)
+	const (
+		userID         = 9101
+		remainingQuota = 50
+		reservedQuota  = 100
+		targetQuota    = 200
+	)
+	seedUser(t, userID, remainingQuota)
+
+	funding := &WalletFunding{userId: userID, consumed: reservedQuota}
+	session := &BillingSession{
+		relayInfo:        &relaycommon.RelayInfo{UserId: userID, IsPlayground: true},
+		funding:          funding,
+		preConsumedQuota: reservedQuota,
+		tokenConsumed:    reservedQuota,
+	}
+
+	err := session.Reserve(targetQuota)
+
+	var apiErr *types.NewAPIError
+	require.ErrorAs(t, err, &apiErr)
+	require.EqualValues(t, types.ErrorCodeInsufficientUserQuota, apiErr.GetErrorCode())
+	require.EqualValues(t, http.StatusForbidden, apiErr.StatusCode)
+	require.True(t, types.IsSkipRetryError(apiErr))
+	require.False(t, types.IsRecordErrorLog(apiErr))
+	require.EqualValues(t, reservedQuota, session.GetPreConsumedQuota())
+	require.EqualValues(t, reservedQuota, funding.consumed)
+
+	quota, quotaErr := model.GetUserQuota(userID, true)
+	require.NoError(t, quotaErr)
+	require.EqualValues(t, remainingQuota, quota)
+}
+
+func TestBillingSessionSettleChargesSubscriptionOverflowToWalletOnce(t *testing.T) {
+	truncate(t)
+	const (
+		userID          = 9201
+		subscriptionID  = 9202
+		preConsumed     = 5_210
+		subscriptionCap = 1_000_000
+		actualQuota     = 5_000_000
+		walletDebt      = 4_000_000
+		requestID       = "subscription-overflow-settlement"
+	)
+	seedUser(t, userID, 0)
+	seedSubscription(t, subscriptionID, userID, subscriptionCap, preConsumed)
+	require.NoError(t, model.DB.Create(&model.UpstreamBillingRecord{
+		LocalRequestId:    requestID,
+		UserId:            userID,
+		Status:            model.UpstreamBillingStatusExact,
+		ChargedQuota:      actualQuota,
+		AdjustmentApplied: true,
+	}).Error)
+
+	relayInfo := &relaycommon.RelayInfo{
+		UserId:                                userID,
+		RequestId:                             requestID,
+		IsPlayground:                          true,
+		BillingSource:                         BillingSourceSubscription,
+		SubscriptionId:                        subscriptionID,
+		SubscriptionPreConsumed:               preConsumed,
+		SubscriptionAmountTotal:               subscriptionCap,
+		SubscriptionAmountUsedAfterPreConsume: preConsumed,
+	}
+	funding := &SubscriptionFunding{
+		requestId:       requestID,
+		userId:          userID,
+		subscriptionId:  subscriptionID,
+		preConsumed:     preConsumed,
+		AmountTotal:     subscriptionCap,
+		AmountUsedAfter: preConsumed,
+	}
+	session := &BillingSession{
+		relayInfo:        relayInfo,
+		funding:          funding,
+		preConsumedQuota: preConsumed,
+	}
+
+	require.NoError(t, session.Settle(actualQuota))
+	require.NoError(t, session.Settle(actualQuota))
+
+	var subscription model.UserSubscription
+	require.NoError(t, model.DB.First(&subscription, subscriptionID).Error)
+	assert.Equal(t, int64(subscriptionCap), subscription.AmountUsed)
+	quota, err := model.GetUserQuota(userID, true)
+	require.NoError(t, err)
+	assert.Equal(t, int64(-walletDebt), quota)
+	assert.Equal(t, int64(subscriptionCap-preConsumed), relayInfo.SubscriptionPostDelta)
+	assert.Equal(t, int64(walletDebt), relayInfo.WalletQuotaDeducted)
+	other := map[string]interface{}{}
+	appendBillingInfo(relayInfo, other)
+	assert.Equal(t, int64(subscriptionCap), other["subscription_consumed"])
+	assert.Equal(t, int64(walletDebt), other["wallet_quota_deducted"])
+	assert.Equal(t, int64(0), other["subscription_remain"])
+
+	var record model.UpstreamBillingRecord
+	require.NoError(t, model.DB.Where("local_request_id = ?", requestID).First(&record).Error)
+	assert.Equal(t, int64(walletDebt), record.WalletAdjustment)
+}

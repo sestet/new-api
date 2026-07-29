@@ -26,6 +26,7 @@ import { cn } from '@/lib/utils'
 
 import { getLogStats, getUserLogStats } from '../api'
 import { DEFAULT_LOG_STATS } from '../constants'
+import { getUsageLogSummary } from '../lib/usage-summary'
 import { buildApiParams } from '../lib/utils'
 import { useLogsViewScope, useUsageLogsContext } from './usage-logs-provider'
 
@@ -78,29 +79,48 @@ export function CommonLogsStats() {
   if (isLoading) {
     return (
       <div className='flex items-center gap-2'>
-        <Skeleton className='h-7 w-[150px] rounded-md' />
-        <Skeleton className='h-7 w-[100px] rounded-md' />
-        <Skeleton className='h-7 w-[120px] rounded-md' />
+        <Skeleton className='h-7 w-24 rounded-md' />
+        <Skeleton className='h-7 w-36 rounded-md' />
+        <Skeleton className='h-7 w-40 rounded-md' />
+        <Skeleton className='h-7 w-28 rounded-md' />
+        <Skeleton className='h-7 w-24 rounded-md' />
       </div>
     )
   }
 
+  const resolvedStats = stats || DEFAULT_LOG_STATS
+  const summary = getUsageLogSummary(resolvedStats)
+  const coverage =
+    summary.coveragePercent == null
+      ? '-'
+      : `${resolvedStats.exact}/${summary.tracked} · ${summary.coveragePercent.toFixed(summary.coveragePercent === 100 ? 0 : 1)}%`
+
   return (
     <div className='flex flex-wrap items-center gap-2'>
       <StatBadge
-        label={t('Usage')}
-        value={sensitiveVisible ? formatLogQuota(stats?.quota || 0) : '••••'}
+        label={t('Requests')}
+        value={resolvedStats.request_count}
+        accent='bg-slate-500/70'
+      />
+      <StatBadge
+        label={t('Total cost')}
+        value={sensitiveVisible ? formatLogQuota(resolvedStats.quota) : '••••'}
         accent='bg-sky-500/70'
       />
       <StatBadge
-        label={t('RPM')}
-        value={stats?.rpm || 0}
-        accent='bg-rose-500/65'
+        label={t('Exact coverage')}
+        value={coverage}
+        accent='bg-emerald-500/70'
       />
       <StatBadge
-        label={t('TPM')}
-        value={stats?.tpm || 0}
-        accent='bg-slate-400/70'
+        label={t('Waiting')}
+        value={summary.waiting}
+        accent='bg-amber-500/70'
+      />
+      <StatBadge
+        label={t('Failed')}
+        value={resolvedStats.failed}
+        accent='bg-rose-500/70'
       />
     </div>
   )

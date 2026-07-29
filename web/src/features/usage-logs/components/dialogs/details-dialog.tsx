@@ -77,6 +77,10 @@ import {
   renderAuditContent,
 } from '../../lib/format'
 import {
+  getUpstreamBillingProviderLabel,
+  getUpstreamBillingStatusPresentation,
+} from '../../lib/upstream-billing-status'
+import {
   getLogTypeConfig,
   isPerCallBilling,
   isTimingLogType,
@@ -164,11 +168,6 @@ function DetailSection(props: {
   )
 }
 
-function formatRatio(ratio: number | undefined): string {
-  if (ratio == null) return '-'
-  return ratio.toFixed(4)
-}
-
 function getUsageBillingPathLabel(
   t: TFunction,
   adminInfo: LogOtherData['admin_info']
@@ -219,6 +218,8 @@ function BillingBreakdown(props: {
   log: UsageLog
   other: LogOtherData
   isAdmin: boolean
+  upstreamAccountName?: string
+  upstreamAccountProvider?: string
 }) {
   const { t } = useTranslation()
   const { log, other, isAdmin } = props
@@ -278,16 +279,6 @@ function BillingBreakdown(props: {
         value: `${fmtPrice(baseInputUSD * other.completion_ratio)}/M`,
       })
     }
-  }
-
-  const userGR = other.user_group_ratio
-  const isUserGR = userGR != null && Number.isFinite(userGR) && userGR !== -1
-  const effectiveGR = isUserGR ? userGR : other.group_ratio
-  if (effectiveGR != null && Number.isFinite(effectiveGR)) {
-    rows.push({
-      label: isUserGR ? t('User Exclusive Ratio') : t('Group Ratio'),
-      value: `${formatRatio(effectiveGR)}x`,
-    })
   }
 
   if (!isTieredExpr && isClaude && hasAnyCacheTokens(other)) {
@@ -387,9 +378,136 @@ function BillingBreakdown(props: {
     })
   }
 
+  const upstreamBillingStatus = getUpstreamBillingStatusPresentation(
+    other.upstream_billing_status
+  )
+  if (upstreamBillingStatus) {
+    rows.push({
+      label: t('Billing Status'),
+      value: t(upstreamBillingStatus.labelKey),
+    })
+  }
+
+  const upstreamBilling = isAdmin
+    ? other.admin_info?.upstream_billing
+    : undefined
+  const groupBilling = upstreamBilling
+    ? {
+        userGroup: upstreamBilling.user_group,
+        usingGroup: upstreamBilling.using_group,
+        ratio: upstreamBilling.group_ratio,
+        source: upstreamBilling.group_ratio_source,
+      }
+    : {
+        userGroup: other.admin_info?.group_billing?.user_group,
+        usingGroup: other.admin_info?.group_billing?.using_group,
+        ratio: other.admin_info?.group_billing?.ratio?.toString(),
+        source: other.admin_info?.group_billing?.ratio_source,
+      }
+  if (upstreamBilling?.credential_id) {
+    rows.push({
+      label: t('Upstream Account'),
+      value: props.upstreamAccountName
+        ? `${props.upstreamAccountName} (#${upstreamBilling.credential_id})`
+        : `#${upstreamBilling.credential_id}`,
+    })
+  }
+
+  const upstreamProvider =
+    props.upstreamAccountProvider || upstreamBilling?.provider
+  if (upstreamProvider) {
+    rows.push({
+      label: t('Provider'),
+      value: getUpstreamBillingProviderLabel(upstreamProvider),
+    })
+  }
+
+  if (isAdmin && groupBilling.userGroup) {
+    rows.push({ label: t('User group'), value: groupBilling.userGroup })
+  }
+  if (isAdmin && groupBilling.usingGroup) {
+    rows.push({ label: t('Using group'), value: groupBilling.usingGroup })
+  }
+  if (isAdmin && groupBilling.ratio) {
+    const sourceLabel =
+      groupBilling.source === 'group_group_ratio'
+        ? t('Group override')
+        : t('Base group ratio')
+    rows.push({
+      label: t('Effective group ratio'),
+      value: `${groupBilling.ratio}x (${sourceLabel})`,
+    })
+  }
+
+  if (upstreamBilling?.estimated_quota != null) {
+    rows.push({
+      label: t('Local estimate'),
+      value: formatLogQuota(upstreamBilling.estimated_quota),
+    })
+  }
+
+  if (upstreamBilling?.upstream_cost_usd?.trim()) {
+    const rawUSD = upstreamBilling.upstream_cost_usd.trim()
+    const localEquivalent = upstreamBilling.upstream_cost_quota
+    rows.push({
+      label: t('Upstream actual cost'),
+      value:
+        localEquivalent != null
+          ? `${rawUSD} USD (${formatLogQuota(localEquivalent)})`
+          : `${rawUSD} USD`,
+    })
+  }
+
+  if (upstreamBilling?.upstream_quota != null) {
+    rows.push({
+      label: t('Upstream source quota'),
+      value: String(upstreamBilling.upstream_quota),
+    })
+  }
+
+  if (upstreamBilling?.adjustment_quota != null) {
+    const adjustment = upstreamBilling.adjustment_quota
+    rows.push({
+      label: t('Adjustment'),
+      value:
+        adjustment === 0
+          ? formatLogQuota(0)
+          : `${adjustment > 0 ? '+' : '-'}${formatLogQuota(Math.abs(adjustment))}`,
+    })
+  }
+
+  if (upstreamBilling?.attempts != null) {
+    rows.push({
+      label: t('Attempts'),
+      value: String(upstreamBilling.attempts),
+    })
+  }
+
+  if (upstreamBilling?.revision_count != null) {
+    rows.push({
+      label: t('Revisions'),
+      value: String(upstreamBilling.revision_count),
+    })
+  }
+
+  if (upstreamBilling?.error) {
+    rows.push({ label: t('Error'), value: upstreamBilling.error })
+  }
+
+  if (upstreamBilling?.margin_quota != null) {
+    const margin = upstreamBilling.margin_quota
+    rows.push({
+      label: t('Billing margin'),
+      value:
+        margin === 0
+          ? formatLogQuota(0)
+          : `${margin > 0 ? '+' : '-'}${formatLogQuota(Math.abs(margin))}`,
+    })
+  }
+
   rows.push({
-    label: t('Total Cost'),
-    value: formatLogQuota(log.quota),
+    label: t('Final user charge'),
+    value: formatLogQuota(upstreamBilling?.charged_quota ?? log.quota),
   })
 
   if (rows.length === 0) return null
@@ -472,6 +590,8 @@ function TokenBreakdown(props: { log: UsageLog; other: LogOtherData }) {
 interface DetailsDialogProps {
   log: UsageLog
   isAdmin: boolean
+  upstreamAccountName?: string
+  upstreamAccountProvider?: string
   open: boolean
   onOpenChange: (open: boolean) => void
 }
@@ -648,10 +768,15 @@ export function DetailsDialog(props: DetailsDialogProps) {
               mono
             />
           )}
-          {props.log.upstream_request_id && (
+          {(props.log.upstream_request_id ||
+            other?.admin_info?.upstream_billing?.upstream_request_id) && (
             <DetailRow
               label={t('Upstream Request ID')}
-              value={props.log.upstream_request_id}
+              value={
+                props.log.upstream_request_id ||
+                other?.admin_info?.upstream_billing?.upstream_request_id ||
+                ''
+              }
               mono
             />
           )}
@@ -1070,6 +1195,8 @@ export function DetailsDialog(props: DetailsDialogProps) {
             log={props.log}
             other={other}
             isAdmin={props.isAdmin}
+            upstreamAccountName={props.upstreamAccountName}
+            upstreamAccountProvider={props.upstreamAccountProvider}
           />
         )}
 
@@ -1188,6 +1315,14 @@ export function DetailsDialog(props: DetailsDialogProps) {
                 mono
               />
             )}
+            {other.wallet_quota_deducted != null &&
+              other.wallet_quota_deducted > 0 && (
+                <DetailRow
+                  label={t('Wallet')}
+                  value={formatLogQuota(other.wallet_quota_deducted)}
+                  mono
+                />
+              )}
             {other.subscription_remain != null && (
               <DetailRow
                 label={t('Remaining')}

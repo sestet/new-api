@@ -25,10 +25,7 @@ import { getLobeIcon } from '@/lib/lobe-icon'
 import { cn } from '@/lib/utils'
 
 import { DEFAULT_TOKEN_UNIT } from '../constants'
-import {
-  getDynamicDisplayGroupRatio,
-  getDynamicPricingSummary,
-} from '../lib/dynamic-price'
+import { getDynamicPricingSummary } from '../lib/dynamic-price'
 import { parseTags } from '../lib/filters'
 import { isTokenBasedModel } from '../lib/model-helpers'
 import { formatPrice, formatRequestPrice } from '../lib/price'
@@ -43,7 +40,6 @@ export interface ModelCardProps {
   usdExchangeRate?: number
   tokenUnit?: TokenUnit
   showRechargePrice?: boolean
-  selectedGroup?: string
   perf?: ModelPerfBadgeData
 }
 
@@ -72,10 +68,6 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
         showRechargePrice,
         priceRate,
         usdExchangeRate,
-        groupRatioMultiplier: getDynamicDisplayGroupRatio(
-          props.model,
-          props.selectedGroup
-        ),
       })
     : null
 
@@ -139,8 +131,7 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
               tokenUnit,
               showRechargePrice,
               priceRate,
-              usdExchangeRate,
-              props.selectedGroup
+              usdExchangeRate
             )}
           </span>
         </span>
@@ -153,8 +144,7 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
               tokenUnit,
               showRechargePrice,
               priceRate,
-              usdExchangeRate,
-              props.selectedGroup
+              usdExchangeRate
             )}
           </span>
         </span>
@@ -168,8 +158,7 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
                 tokenUnit,
                 showRechargePrice,
                 priceRate,
-                usdExchangeRate,
-                props.selectedGroup
+                usdExchangeRate
               )}
             </span>
           </span>
@@ -184,8 +173,7 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
             props.model,
             showRechargePrice,
             priceRate,
-            usdExchangeRate,
-            props.selectedGroup
+            usdExchangeRate
           )}
         </span>{' '}
         / {t('request')}

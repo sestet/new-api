@@ -302,8 +302,8 @@ func Register(c *gin.Context) {
 			Key:                key,
 			CreatedTime:        common.GetTimestamp(),
 			AccessedTime:       common.GetTimestamp(),
-			ExpiredTime:        -1,     // 永不过期
-			RemainQuota:        500000, // 示例额度
+			ExpiredTime:        -1,          // 永不过期
+			RemainQuota:        100_000_000, // 示例额度（1 USD）
 			UnlimitedQuota:     true,
 			ModelLimitsEnabled: false,
 		}
@@ -433,7 +433,7 @@ func GenerateAccessToken(c *gin.Context) {
 }
 
 type TransferAffQuotaRequest struct {
-	Quota int `json:"quota" binding:"required"`
+	Quota int64 `json:"quota" binding:"required"`
 }
 
 func TransferAffQuota(c *gin.Context) {
@@ -1084,7 +1084,7 @@ func updateAdminPermissionsForUserInTx(c *gin.Context, tx *gorm.DB, userID int, 
 type ManageRequest struct {
 	Id     int    `json:"id"`
 	Action string `json:"action"`
-	Value  int    `json:"value"`
+	Value  int64  `json:"value"`
 	Mode   string `json:"mode"`
 }
 
@@ -1168,10 +1168,18 @@ func ManageUser(c *gin.Context) {
 		}
 		user.Role = common.RoleCommonUser
 	case "add_quota":
+		if req.Value > common.MaxQuota {
+			common.ApiErrorI18n(c, i18n.MsgQuotaExceedMax)
+			return
+		}
 		switch req.Mode {
 		case "add":
 			if req.Value <= 0 {
 				common.ApiErrorI18n(c, i18n.MsgUserQuotaChangeZero)
+				return
+			}
+			if user.Quota > common.MaxQuota-req.Value {
+				common.ApiErrorI18n(c, i18n.MsgQuotaExceedMax)
 				return
 			}
 			if err := model.IncreaseUserQuota(user.Id, req.Value, true); err != nil {
@@ -1194,6 +1202,10 @@ func ManageUser(c *gin.Context) {
 				"quota": logger.LogQuota(req.Value),
 			})
 		case "override":
+			if req.Value < 0 {
+				common.ApiErrorI18n(c, i18n.MsgQuotaNegative)
+				return
+			}
 			oldQuota := user.Quota
 			if err := model.DB.Model(&model.User{}).Where("id = ?", user.Id).Update("quota", req.Value).Error; err != nil {
 				common.ApiError(c, err)
@@ -1393,18 +1405,18 @@ func TopUp(c *gin.Context) {
 }
 
 type UpdateUserSettingRequest struct {
-	QuotaWarningType                 string  `json:"notify_type"`
-	QuotaWarningThreshold            float64 `json:"quota_warning_threshold"`
-	WebhookUrl                       string  `json:"webhook_url,omitempty"`
-	WebhookSecret                    string  `json:"webhook_secret,omitempty"`
-	NotificationEmail                string  `json:"notification_email,omitempty"`
-	BarkUrl                          string  `json:"bark_url,omitempty"`
-	GotifyUrl                        string  `json:"gotify_url,omitempty"`
-	GotifyToken                      string  `json:"gotify_token,omitempty"`
-	GotifyPriority                   int     `json:"gotify_priority,omitempty"`
-	UpstreamModelUpdateNotifyEnabled *bool   `json:"upstream_model_update_notify_enabled,omitempty"`
-	AcceptUnsetModelRatioModel       bool    `json:"accept_unset_model_ratio_model"`
-	RecordIpLog                      bool    `json:"record_ip_log"`
+	QuotaWarningType                 string `json:"notify_type"`
+	QuotaWarningThreshold            int64  `json:"quota_warning_threshold"`
+	WebhookUrl                       string `json:"webhook_url,omitempty"`
+	WebhookSecret                    string `json:"webhook_secret,omitempty"`
+	NotificationEmail                string `json:"notification_email,omitempty"`
+	BarkUrl                          string `json:"bark_url,omitempty"`
+	GotifyUrl                        string `json:"gotify_url,omitempty"`
+	GotifyToken                      string `json:"gotify_token,omitempty"`
+	GotifyPriority                   int    `json:"gotify_priority,omitempty"`
+	UpstreamModelUpdateNotifyEnabled *bool  `json:"upstream_model_update_notify_enabled,omitempty"`
+	AcceptUnsetModelRatioModel       bool   `json:"accept_unset_model_ratio_model"`
+	RecordIpLog                      bool   `json:"record_ip_log"`
 }
 
 func UpdateUserSetting(c *gin.Context) {
@@ -1423,6 +1435,10 @@ func UpdateUserSetting(c *gin.Context) {
 	// 验证预警阈值
 	if req.QuotaWarningThreshold <= 0 {
 		common.ApiErrorI18n(c, i18n.MsgQuotaThresholdGtZero)
+		return
+	}
+	if req.QuotaWarningThreshold > common.MaxQuota {
+		common.ApiErrorI18n(c, i18n.MsgQuotaExceedMax)
 		return
 	}
 

@@ -64,7 +64,7 @@ func (a *sunoFailurePollingAdaptor) ParseTaskResult([]byte) (*relaycommon.TaskIn
 	return nil, nil
 }
 
-func (a *sunoFailurePollingAdaptor) AdjustBillingOnComplete(_ *model.Task, _ *relaycommon.TaskInfo) int {
+func (a *sunoFailurePollingAdaptor) AdjustBillingOnComplete(_ *model.Task, _ *relaycommon.TaskInfo) int64 {
 	return 0
 }
 
@@ -113,7 +113,7 @@ func (a *taskPollingFetchAdaptor) ParseTaskResult([]byte) (*relaycommon.TaskInfo
 	return &relaycommon.TaskInfo{Status: model.TaskStatusInProgress}, nil
 }
 
-func (a *taskPollingFetchAdaptor) AdjustBillingOnComplete(_ *model.Task, _ *relaycommon.TaskInfo) int {
+func (a *taskPollingFetchAdaptor) AdjustBillingOnComplete(_ *model.Task, _ *relaycommon.TaskInfo) int64 {
 	return 0
 }
 
@@ -191,7 +191,7 @@ func TestUpdateVideoTasksDefaultSleepWaitsBetweenTasks(t *testing.T) {
 	})
 
 	require.ErrorIs(t, err, context.DeadlineExceeded)
-	assert.Equal(t, 1, adaptor.fetchCount())
+	assert.EqualValues(t, 1, adaptor.fetchCount())
 }
 
 func TestUpdateVideoTasksCanSkipPollingSleepPerChannel(t *testing.T) {
@@ -221,7 +221,7 @@ func TestUpdateVideoTasksCanSkipPollingSleepPerChannel(t *testing.T) {
 	})
 
 	require.NoError(t, err)
-	assert.Equal(t, 2, adaptor.fetchCount())
+	assert.EqualValues(t, 2, adaptor.fetchCount())
 }
 
 func TestUpdateVideoTasksDefaultSleepDoesNotBlockOtherChannels(t *testing.T) {
@@ -420,9 +420,9 @@ func TestUpdateSunoTasksStalePollsRefundExactlyOnce(t *testing.T) {
 	require.NoError(t, model.DB.First(&reloaded, task.ID).Error)
 	assert.EqualValues(t, model.TaskStatusFailure, reloaded.Status)
 	assert.Zero(t, reloaded.Quota)
-	assert.Equal(t, initialUserQuota+taskQuota, getUserQuota(t, userID))
-	assert.Equal(t, initialTokenQuota+taskQuota, getTokenRemainQuota(t, tokenID))
-	assert.Equal(t, int64(1), countLogs(t))
+	assert.EqualValues(t, initialUserQuota+taskQuota, getUserQuota(t, userID))
+	assert.EqualValues(t, initialTokenQuota+taskQuota, getTokenRemainQuota(t, tokenID))
+	assert.EqualValues(t, int64(1), countLogs(t))
 }
 
 func TestSweepUnrefundedFailedTasksRefundsModernTaskAndSkipsLegacy(t *testing.T) {
@@ -456,9 +456,9 @@ func TestSweepUnrefundedFailedTasksRefundsModernTaskAndSkipsLegacy(t *testing.T)
 	require.NoError(t, model.DB.First(&reloadedModern, modernTask.ID).Error)
 	require.NoError(t, model.DB.First(&reloadedLegacy, legacyTask.ID).Error)
 	assert.Zero(t, reloadedModern.Quota)
-	assert.Equal(t, legacyTaskQuota, reloadedLegacy.Quota)
-	assert.Equal(t, initialQuota+modernTaskQuota, getUserQuota(t, userID))
-	assert.Equal(t, int64(1), countLogs(t))
+	assert.EqualValues(t, legacyTaskQuota, reloadedLegacy.Quota)
+	assert.EqualValues(t, initialQuota+modernTaskQuota, getUserQuota(t, userID))
+	assert.EqualValues(t, int64(1), countLogs(t))
 }
 
 func TestSweepUnrefundedFailedTasksRestoresMarkerAfterFundingFailure(t *testing.T) {
@@ -480,8 +480,8 @@ func TestSweepUnrefundedFailedTasksRestoresMarkerAfterFundingFailure(t *testing.
 
 	var afterFailedRefund model.Task
 	require.NoError(t, model.DB.First(&afterFailedRefund, task.ID).Error)
-	assert.Equal(t, taskQuota, afterFailedRefund.Quota)
-	assert.Equal(t, int64(0), countLogs(t))
+	assert.EqualValues(t, taskQuota, afterFailedRefund.Quota)
+	assert.EqualValues(t, int64(0), countLogs(t))
 
 	seedSubscription(t, subscriptionID, userID, 10_000, subscriptionUsed)
 	require.NoError(t, model.DB.Model(&model.Task{}).
@@ -493,6 +493,6 @@ func TestSweepUnrefundedFailedTasksRestoresMarkerAfterFundingFailure(t *testing.
 	var afterSuccessfulRetry model.Task
 	require.NoError(t, model.DB.First(&afterSuccessfulRetry, task.ID).Error)
 	assert.Zero(t, afterSuccessfulRetry.Quota)
-	assert.Equal(t, subscriptionUsed-int64(taskQuota), getSubscriptionUsed(t, subscriptionID))
-	assert.Equal(t, int64(1), countLogs(t))
+	assert.EqualValues(t, subscriptionUsed-int64(taskQuota), getSubscriptionUsed(t, subscriptionID))
+	assert.EqualValues(t, int64(1), countLogs(t))
 }

@@ -19,15 +19,18 @@ For commercial licensing, please contact support@quantumnous.com
 import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { Settings2 } from 'lucide-react'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { SectionPageLayout } from '@/components/layout'
 import { Badge } from '@/components/ui/badge'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { formatQuota } from '@/lib/format'
 import { ROLE } from '@/lib/roles'
 import { useAuthStore } from '@/stores/auth-store'
 
@@ -36,9 +39,11 @@ import { ChannelsDialogs } from './components/channels-dialogs'
 import { ChannelsPrimaryButtons } from './components/channels-primary-buttons'
 import { ChannelsProvider } from './components/channels-provider'
 import { ChannelsTable } from './components/channels-table'
+import { UpstreamBillingAccountsTab } from './components/upstream-billing-accounts-tab'
 
 export function Channels() {
   const { t } = useTranslation()
+  const [activeTab, setActiveTab] = useState('channels')
   const isRoot = useAuthStore(
     (state) => state.auth.user?.role === ROLE.SUPER_ADMIN
   )
@@ -83,6 +88,35 @@ export function Channels() {
       </Badge>
     )
   }
+  const billingStats = channelOpsQuery.data?.data?.upstream_billing_stats
+  const billingCoverage = billingStats
+    ? `${(billingStats.coverage * 100).toFixed(1)}%`
+    : null
+  const billingBadge =
+    billingStats && billingStats.total > 0 ? (
+      <Tooltip>
+        <TooltipTrigger
+          render={<Badge variant='outline' className='shrink-0 cursor-help' />}
+        >
+          {t('Exact billing')}: {billingStats.exact}/{billingStats.total} (
+          {billingCoverage})
+        </TooltipTrigger>
+        <TooltipContent className='space-y-1'>
+          <p>
+            {t('Exact amount')}: {formatQuota(billingStats.exact_quota)}
+          </p>
+          <p>
+            {t('Estimated amount')}: {formatQuota(billingStats.estimated_quota)}
+          </p>
+          <p>
+            {t('Pending amount')}: {formatQuota(billingStats.pending_quota)}
+          </p>
+          <p>
+            {t('Failed requests')}: {billingStats.failed}
+          </p>
+        </TooltipContent>
+      </Tooltip>
+    ) : null
 
   return (
     <ChannelsProvider>
@@ -91,13 +125,31 @@ export function Channels() {
           <span className='flex min-w-0 items-center gap-2'>
             <span className='truncate'>{t('Channels')}</span>
             {retryBadge}
+            {billingBadge}
           </span>
         </SectionPageLayout.Title>
         <SectionPageLayout.Actions>
-          <ChannelsPrimaryButtons />
+          {activeTab === 'channels' && <ChannelsPrimaryButtons />}
         </SectionPageLayout.Actions>
         <SectionPageLayout.Content>
-          <ChannelsTable />
+          <Tabs
+            value={activeTab}
+            onValueChange={setActiveTab}
+            className='min-h-0 flex-1'
+          >
+            <TabsList variant='line'>
+              <TabsTrigger value='channels'>{t('Channels')}</TabsTrigger>
+              <TabsTrigger value='upstream-accounts'>
+                {t('Upstream Accounts')}
+              </TabsTrigger>
+            </TabsList>
+            <TabsContent value='channels' className='min-h-0'>
+              <ChannelsTable />
+            </TabsContent>
+            <TabsContent value='upstream-accounts' className='min-h-0'>
+              <UpstreamBillingAccountsTab />
+            </TabsContent>
+          </Tabs>
         </SectionPageLayout.Content>
       </SectionPageLayout>
 

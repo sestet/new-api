@@ -576,14 +576,11 @@ function PriceSection(props: {
   const { t } = useTranslation()
   const isTokenBased = isTokenBasedModel(props.model)
   const tokenUnitLabel = props.tokenUnit === 'K' ? '1K' : '1M'
-  const baseGroupKey = '_base'
-  const baseGroupRatioMap = { [baseGroupKey]: 1 }
   const dynamicSummary = getDynamicPricingSummary(props.model, {
     tokenUnit: props.tokenUnit,
     showRechargePrice: props.showRechargePrice,
     priceRate: props.priceRate,
     usdExchangeRate: props.usdExchangeRate,
-    groupRatioMultiplier: 1,
   })
 
   const primaryPriceTypes: { label: string; type: PriceType }[] = [
@@ -713,11 +710,9 @@ function PriceSection(props: {
           <span className='text-foreground font-mono text-sm font-semibold tabular-nums'>
             {formatFixedPrice(
               props.model,
-              baseGroupKey,
               props.showRechargePrice,
               props.priceRate,
-              props.usdExchangeRate,
-              baseGroupRatioMap
+              props.usdExchangeRate
             )}
           </span>
         </div>
@@ -730,13 +725,11 @@ function PriceSection(props: {
     <>
       {formatGroupPrice(
         props.model,
-        baseGroupKey,
         type,
         props.tokenUnit,
         props.showRechargePrice,
         props.priceRate,
-        props.usdExchangeRate,
-        baseGroupRatioMap
+        props.usdExchangeRate
       )}
       <span className='text-muted-foreground/40 ml-1 text-xs font-normal'>
         / {tokenUnitLabel}
@@ -851,8 +844,7 @@ function getDynamicFormattedPricesByTier(
 
 function GroupPricingSection(props: {
   model: PricingModel
-  groupRatio: Record<string, number>
-  usableGroup: Record<string, { desc: string; ratio: number }>
+  usableGroup: Record<string, { desc: string }>
   autoGroups: string[]
   priceRate: number
   usdExchangeRate: number
@@ -924,7 +916,7 @@ function GroupPricingSection(props: {
             </div>
             <p className='text-muted-foreground mt-1 text-xs'>
               {t(
-                'Group prices cannot be expanded because this expression is not a standard tiered pricing expression.'
+                'This expression cannot be expanded into standard pricing tiers.'
               )}
             </p>
             <div className='mt-3'>
@@ -945,11 +937,9 @@ function GroupPricingSection(props: {
       showRechargePrice,
       priceRate: props.priceRate,
       usdExchangeRate: props.usdExchangeRate,
-      groupRatioMultiplier: 1,
     })
     const formattedPricesByGroup = new Map(
       availableGroups.map((group) => {
-        const ratio = props.groupRatio[group] || 1
         return [
           group,
           getDynamicFormattedPricesByTier(dynamicTiers, {
@@ -957,7 +947,6 @@ function GroupPricingSection(props: {
             showRechargePrice,
             priceRate: props.priceRate,
             usdExchangeRate: props.usdExchangeRate,
-            groupRatioMultiplier: ratio,
           }),
         ] as const
       })
@@ -969,18 +958,14 @@ function GroupPricingSection(props: {
         <AutoGroupChain model={props.model} autoGroups={props.autoGroups} />
         <div className='space-y-3'>
           {availableGroups.map((group) => {
-            const ratio = props.groupRatio[group] || 1
             const formattedPricesByTier =
               formattedPricesByGroup.get(group) ??
               new Map<DynamicPricingTier, Map<string, string>>()
 
             return (
               <div key={group} className='overflow-hidden rounded-lg border'>
-                <div className='bg-muted/20 flex items-center justify-between gap-3 border-b px-3 py-2'>
+                <div className='bg-muted/20 flex items-center gap-3 border-b px-3 py-2'>
                   <GroupBadge group={group} size='sm' />
-                  <span className='text-muted-foreground font-mono text-xs'>
-                    {ratio}x
-                  </span>
                 </div>
                 <StaticDataTable
                   className='rounded-none border-0'
@@ -1021,25 +1006,21 @@ function GroupPricingSection(props: {
     )
   }
 
-  const renderGroupPrice = (group: string, type: PriceType) =>
+  const renderGroupPrice = (type: PriceType) =>
     formatGroupPrice(
       props.model,
-      group,
       type,
       props.tokenUnit,
       showRechargePrice,
       props.priceRate,
-      props.usdExchangeRate,
-      props.groupRatio
+      props.usdExchangeRate
     )
-  const renderFixedGroupPrice = (group: string) =>
+  const renderFixedGroupPrice = () =>
     formatFixedPrice(
       props.model,
-      group,
       showRechargePrice,
       props.priceRate,
-      props.usdExchangeRate,
-      props.groupRatio
+      props.usdExchangeRate
     )
 
   return (
@@ -1060,13 +1041,6 @@ function GroupPricingSection(props: {
             cellClassName: 'py-2.5',
             cell: (group) => <GroupBadge group={group} size='sm' />,
           },
-          {
-            id: 'ratio',
-            header: t('Ratio'),
-            className: thClass,
-            cellClassName: 'text-muted-foreground py-2.5 font-mono',
-            cell: (group) => `${props.groupRatio[group] || 1}x`,
-          },
           ...(isTokenBased
             ? [
                 {
@@ -1074,21 +1048,21 @@ function GroupPricingSection(props: {
                   header: t('Input'),
                   className: `${thClass} text-right`,
                   cellClassName: 'py-2.5 text-right font-mono',
-                  cell: (group: string) => renderGroupPrice(group, 'input'),
+                  cell: () => renderGroupPrice('input'),
                 },
                 {
                   id: 'output',
                   header: t('Output'),
                   className: `${thClass} text-right`,
                   cellClassName: 'py-2.5 text-right font-mono',
-                  cell: (group: string) => renderGroupPrice(group, 'output'),
+                  cell: () => renderGroupPrice('output'),
                 },
                 ...extraPriceTypes.map((ep) => ({
                   id: ep.type,
                   header: ep.label,
                   className: `${thClass} text-right`,
                   cellClassName: 'py-2.5 text-right font-mono',
-                  cell: (group: string) => renderGroupPrice(group, ep.type),
+                  cell: () => renderGroupPrice(ep.type),
                 })),
               ]
             : [
@@ -1127,8 +1101,7 @@ const TAB_META: Record<
 
 export interface ModelDetailsContentProps {
   model: PricingModel
-  groupRatio: Record<string, number>
-  usableGroup: Record<string, { desc: string; ratio: number }>
+  usableGroup: Record<string, { desc: string }>
   endpointMap: Record<string, { path?: string; method?: string }>
   autoGroups: string[]
   priceRate: number
@@ -1183,7 +1156,6 @@ export function ModelDetailsContent(props: ModelDetailsContentProps) {
             )}
             <GroupPricingSection
               model={props.model}
-              groupRatio={props.groupRatio}
               usableGroup={props.usableGroup}
               autoGroups={props.autoGroups}
               priceRate={props.priceRate}
@@ -1252,7 +1224,6 @@ export function ModelDetails() {
 
   const {
     models,
-    groupRatio,
     usableGroup,
     endpointMap,
     autoGroups,
@@ -1331,7 +1302,6 @@ export function ModelDetails() {
 
         <ModelDetailsContent
           model={model}
-          groupRatio={groupRatio || {}}
           usableGroup={usableGroup || {}}
           autoGroups={autoGroups || []}
           priceRate={priceRate ?? 1}

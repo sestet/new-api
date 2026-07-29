@@ -4,7 +4,10 @@ import (
 	"math"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // ---------------------------------------------------------------------------
@@ -279,7 +282,7 @@ func TestZeroTokens(t *testing.T) {
 func TestQuotaRound(t *testing.T) {
 	tests := []struct {
 		in   float64
-		want int
+		want int64
 	}{
 		{0, 0},
 		{0.4, 0},
@@ -291,9 +294,9 @@ func TestQuotaRound(t *testing.T) {
 		{999.4999, 999},
 		{999.5, 1000},
 		{1e9 + 0.5, 1e9 + 1},
-		// Oversized expression results saturate at int32 (delegated to
+		// Oversized expression results saturate at the API-safe quota limit (delegated to
 		// common.QuotaRound); full saturation coverage lives in common.
-		{3.6893488147419103e19, math.MaxInt32},
+		{3.6893488147419103e19, common.MaxQuota},
 	}
 	for _, tt := range tests {
 		got := billingexpr.QuotaRound(tt.in)
@@ -312,11 +315,9 @@ func TestComputeTieredQuota_Basic(t *testing.T) {
 		BillingMode:               "tiered_expr",
 		ExprString:                claudeExpr,
 		ExprHash:                  billingexpr.ExprHashString(claudeExpr),
-		GroupRatio:                1.0,
 		EstimatedPromptTokens:     100000,
 		EstimatedCompletionTokens: 5000,
-		EstimatedQuotaBeforeGroup: (100000*1.5 + 5000*7.5) / 1_000_000 * 500_000,
-		EstimatedQuotaAfterGroup:  billingexpr.QuotaRound((100000*1.5 + 5000*7.5) / 1_000_000 * 500_000),
+		EstimatedQuota:            billingexpr.QuotaRound((100000*1.5 + 5000*7.5) / 1_000_000 * 500_000),
 		EstimatedTier:             "standard",
 		QuotaPerUnit:              500_000,
 	}
@@ -327,8 +328,8 @@ func TestComputeTieredQuota_Basic(t *testing.T) {
 	}
 
 	wantBefore := (300000*3.0 + 10000*11.25) / 1_000_000 * 500_000
-	if math.Abs(result.ActualQuotaBeforeGroup-wantBefore) > 1e-6 {
-		t.Errorf("before group: got %f, want %f", result.ActualQuotaBeforeGroup, wantBefore)
+	if math.Abs(result.ActualQuotaRaw-wantBefore) > 1e-6 {
+		t.Errorf("before group: got %f, want %f", result.ActualQuotaRaw, wantBefore)
 	}
 	if result.MatchedTier != "long_context" {
 		t.Errorf("tier = %q, want %q", result.MatchedTier, "long_context")
@@ -343,11 +344,9 @@ func TestComputeTieredQuota_SameTier(t *testing.T) {
 		BillingMode:               "tiered_expr",
 		ExprString:                claudeExpr,
 		ExprHash:                  billingexpr.ExprHashString(claudeExpr),
-		GroupRatio:                1.5,
 		EstimatedPromptTokens:     50000,
 		EstimatedCompletionTokens: 1000,
-		EstimatedQuotaBeforeGroup: (50000*1.5 + 1000*7.5) / 1_000_000 * 500_000,
-		EstimatedQuotaAfterGroup:  billingexpr.QuotaRound((50000*1.5 + 1000*7.5) / 1_000_000 * 500_000 * 1.5),
+		EstimatedQuota:            billingexpr.QuotaRound((50000*1.5 + 1000*7.5) / 1_000_000 * 500_000),
 		EstimatedTier:             "standard",
 		QuotaPerUnit:              500_000,
 	}
@@ -358,9 +357,9 @@ func TestComputeTieredQuota_SameTier(t *testing.T) {
 	}
 
 	wantBefore := (80000*1.5 + 2000*7.5) / 1_000_000 * 500_000
-	wantAfter := billingexpr.QuotaRound(wantBefore * 1.5)
-	if result.ActualQuotaAfterGroup != wantAfter {
-		t.Errorf("after group: got %d, want %d", result.ActualQuotaAfterGroup, wantAfter)
+	wantAfter := billingexpr.QuotaRound(wantBefore)
+	if result.ActualQuota != wantAfter {
+		t.Errorf("after group: got %d, want %d", result.ActualQuota, wantAfter)
 	}
 	if result.CrossedTier {
 		t.Error("expected crossed_tier=false (both standard)")
@@ -535,11 +534,9 @@ func TestComputeTieredQuota_WithCache(t *testing.T) {
 		BillingMode:               "tiered_expr",
 		ExprString:                claudeWithCacheExpr,
 		ExprHash:                  billingexpr.ExprHashString(claudeWithCacheExpr),
-		GroupRatio:                1.0,
 		EstimatedPromptTokens:     100000,
 		EstimatedCompletionTokens: 5000,
-		EstimatedQuotaBeforeGroup: (100000*1.5 + 5000*7.5) / 1_000_000 * 500_000,
-		EstimatedQuotaAfterGroup:  billingexpr.QuotaRound((100000*1.5 + 5000*7.5) / 1_000_000 * 500_000),
+		EstimatedQuota:            billingexpr.QuotaRound((100000*1.5 + 5000*7.5) / 1_000_000 * 500_000),
 		EstimatedTier:             "standard",
 		QuotaPerUnit:              500_000,
 	}
@@ -551,8 +548,8 @@ func TestComputeTieredQuota_WithCache(t *testing.T) {
 	}
 
 	wantBefore := (100000*1.5 + 5000*7.5 + 50000*0.15 + 10000*1.875) / 1_000_000 * 500_000
-	if math.Abs(result.ActualQuotaBeforeGroup-wantBefore) > 1e-6 {
-		t.Errorf("before group: got %f, want %f", result.ActualQuotaBeforeGroup, wantBefore)
+	if math.Abs(result.ActualQuotaRaw-wantBefore) > 1e-6 {
+		t.Errorf("before group: got %f, want %f", result.ActualQuotaRaw, wantBefore)
 	}
 	if result.MatchedTier != "standard" {
 		t.Errorf("tier = %q, want %q", result.MatchedTier, "standard")
@@ -567,11 +564,9 @@ func TestComputeTieredQuota_WithCacheCrossTier(t *testing.T) {
 		BillingMode:               "tiered_expr",
 		ExprString:                claudeWithCacheExpr,
 		ExprHash:                  billingexpr.ExprHashString(claudeWithCacheExpr),
-		GroupRatio:                2.0,
 		EstimatedPromptTokens:     100000,
 		EstimatedCompletionTokens: 5000,
-		EstimatedQuotaBeforeGroup: (100000*1.5 + 5000*7.5) / 1_000_000 * 500_000,
-		EstimatedQuotaAfterGroup:  billingexpr.QuotaRound((100000*1.5 + 5000*7.5) / 1_000_000 * 500_000 * 2.0),
+		EstimatedQuota:            billingexpr.QuotaRound((100000*1.5 + 5000*7.5) / 1_000_000 * 500_000),
 		EstimatedTier:             "standard",
 		QuotaPerUnit:              500_000,
 	}
@@ -583,12 +578,12 @@ func TestComputeTieredQuota_WithCacheCrossTier(t *testing.T) {
 	}
 
 	wantBefore := (300000*3.0 + 10000*11.25 + 50000*0.3 + 10000*3.75) / 1_000_000 * 500_000
-	wantAfter := billingexpr.QuotaRound(wantBefore * 2.0)
-	if math.Abs(result.ActualQuotaBeforeGroup-wantBefore) > 1e-6 {
-		t.Errorf("before group: got %f, want %f", result.ActualQuotaBeforeGroup, wantBefore)
+	wantAfter := billingexpr.QuotaRound(wantBefore)
+	if math.Abs(result.ActualQuotaRaw-wantBefore) > 1e-6 {
+		t.Errorf("before group: got %f, want %f", result.ActualQuotaRaw, wantBefore)
 	}
-	if result.ActualQuotaAfterGroup != wantAfter {
-		t.Errorf("after group: got %d, want %d", result.ActualQuotaAfterGroup, wantAfter)
+	if result.ActualQuota != wantAfter {
+		t.Errorf("after group: got %d, want %d", result.ActualQuota, wantAfter)
 	}
 	if !result.CrossedTier {
 		t.Error("expected crossed_tier=true (estimated standard, actual long_context)")
@@ -605,7 +600,6 @@ func TestComputeTieredQuota_BasicSettlement(t *testing.T) {
 		BillingMode:  "tiered_expr",
 		ExprString:   exprStr,
 		ExprHash:     billingexpr.ExprHashString(exprStr),
-		GroupRatio:   1.0,
 		QuotaPerUnit: 500_000,
 	}
 
@@ -614,35 +608,33 @@ func TestComputeTieredQuota_BasicSettlement(t *testing.T) {
 		t.Fatal(err)
 	}
 	// exprOutput = 5000; quota = 5000 / 1M * 500K = 2500
-	if math.Abs(result.ActualQuotaBeforeGroup-2500) > 1e-6 {
-		t.Errorf("before group = %f, want 2500", result.ActualQuotaBeforeGroup)
+	if math.Abs(result.ActualQuotaRaw-2500) > 1e-6 {
+		t.Errorf("before group = %f, want 2500", result.ActualQuotaRaw)
 	}
-	if result.ActualQuotaAfterGroup != 2500 {
-		t.Errorf("after group = %d, want 2500", result.ActualQuotaAfterGroup)
+	if result.ActualQuota != 2500 {
+		t.Errorf("after group = %d, want 2500", result.ActualQuota)
 	}
 	if result.MatchedTier != "default" {
 		t.Errorf("tier = %q, want default", result.MatchedTier)
 	}
 }
 
-func TestComputeTieredQuota_WithGroupRatio(t *testing.T) {
+func TestComputeTieredQuotaUsesSnapshottedGroupRatio(t *testing.T) {
 	exprStr := `tier("default", p + c)`
 	snap := &billingexpr.BillingSnapshot{
-		BillingMode:  "tiered_expr",
-		ExprString:   exprStr,
-		ExprHash:     billingexpr.ExprHashString(exprStr),
-		GroupRatio:   2.0,
-		QuotaPerUnit: 500_000,
+		BillingMode:      "tiered_expr",
+		ExprString:       exprStr,
+		ExprHash:         billingexpr.ExprHashString(exprStr),
+		QuotaPerUnit:     500_000,
+		GroupRatio:       2,
+		GroupRatioSource: "group_group_ratio",
 	}
 
 	result, err := billingexpr.ComputeTieredQuota(snap, billingexpr.TokenParams{P: 1000, C: 500})
-	if err != nil {
-		t.Fatal(err)
-	}
-	// exprOutput = 1500; quotaBeforeGroup = 750; afterGroup = round(750 * 2.0) = 1500
-	if result.ActualQuotaAfterGroup != 1500 {
-		t.Errorf("after group = %d, want 1500", result.ActualQuotaAfterGroup)
-	}
+
+	require.NoError(t, err)
+	assert.Equal(t, int64(1500), result.ActualQuota)
+	assert.InDelta(t, 1500, result.ActualQuotaRaw, 1e-6)
 }
 
 func TestComputeTieredQuota_ZeroTokens(t *testing.T) {
@@ -651,7 +643,6 @@ func TestComputeTieredQuota_ZeroTokens(t *testing.T) {
 		BillingMode:  "tiered_expr",
 		ExprString:   exprStr,
 		ExprHash:     billingexpr.ExprHashString(exprStr),
-		GroupRatio:   1.0,
 		QuotaPerUnit: 500_000,
 	}
 
@@ -659,8 +650,8 @@ func TestComputeTieredQuota_ZeroTokens(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.ActualQuotaAfterGroup != 0 {
-		t.Errorf("after group = %d, want 0", result.ActualQuotaAfterGroup)
+	if result.ActualQuota != 0 {
+		t.Errorf("after group = %d, want 0", result.ActualQuota)
 	}
 }
 
@@ -670,7 +661,6 @@ func TestComputeTieredQuota_RoundingEdge(t *testing.T) {
 		BillingMode:  "tiered_expr",
 		ExprString:   exprStr,
 		ExprHash:     billingexpr.ExprHashString(exprStr),
-		GroupRatio:   1.0,
 		QuotaPerUnit: 500_000,
 	}
 
@@ -679,8 +669,8 @@ func TestComputeTieredQuota_RoundingEdge(t *testing.T) {
 		t.Fatal(err)
 	}
 	// 3 * 0.5 = 1.5 (expr); quota = 1.5 / 1M * 500K = 0.75; round(0.75) = 1
-	if result.ActualQuotaAfterGroup != 1 {
-		t.Errorf("after group = %d, want 1 (round 0.75 up)", result.ActualQuotaAfterGroup)
+	if result.ActualQuota != 1 {
+		t.Errorf("after group = %d, want 1 (round 0.75 up)", result.ActualQuota)
 	}
 }
 
@@ -690,7 +680,6 @@ func TestComputeTieredQuota_RoundingEdgeDown(t *testing.T) {
 		BillingMode:  "tiered_expr",
 		ExprString:   exprStr,
 		ExprHash:     billingexpr.ExprHashString(exprStr),
-		GroupRatio:   1.0,
 		QuotaPerUnit: 500_000,
 	}
 
@@ -699,8 +688,8 @@ func TestComputeTieredQuota_RoundingEdgeDown(t *testing.T) {
 		t.Fatal(err)
 	}
 	// 3 * 0.4 = 1.2 (expr); quota = 1.2 / 1M * 500K = 0.6; round(0.6) = 1
-	if result.ActualQuotaAfterGroup != 1 {
-		t.Errorf("after group = %d, want 1 (round 0.6 up)", result.ActualQuotaAfterGroup)
+	if result.ActualQuota != 1 {
+		t.Errorf("after group = %d, want 1 (round 0.6 up)", result.ActualQuota)
 	}
 }
 
@@ -710,7 +699,6 @@ func TestComputeTieredQuotaWithRequest_ProbeAffectsQuota(t *testing.T) {
 		BillingMode:   "tiered_expr",
 		ExprString:    exprStr,
 		ExprHash:      billingexpr.ExprHashString(exprStr),
-		GroupRatio:    1.0,
 		EstimatedTier: "normal",
 		QuotaPerUnit:  500_000,
 	}
@@ -721,8 +709,8 @@ func TestComputeTieredQuotaWithRequest_ProbeAffectsQuota(t *testing.T) {
 		t.Fatal(err)
 	}
 	// normal: p*2 = 2000; quota = 2000 / 1M * 500K = 1000
-	if r1.ActualQuotaAfterGroup != 1000 {
-		t.Errorf("normal = %d, want 1000", r1.ActualQuotaAfterGroup)
+	if r1.ActualQuota != 1000 {
+		t.Errorf("normal = %d, want 1000", r1.ActualQuota)
 	}
 
 	// With request: fast tier
@@ -733,8 +721,8 @@ func TestComputeTieredQuotaWithRequest_ProbeAffectsQuota(t *testing.T) {
 		t.Fatal(err)
 	}
 	// fast: p*4 = 4000; quota = 4000 / 1M * 500K = 2000
-	if r2.ActualQuotaAfterGroup != 2000 {
-		t.Errorf("fast = %d, want 2000", r2.ActualQuotaAfterGroup)
+	if r2.ActualQuota != 2000 {
+		t.Errorf("fast = %d, want 2000", r2.ActualQuota)
 	}
 	if !r2.CrossedTier {
 		t.Error("expected CrossedTier = true when probe changes tier")
@@ -747,7 +735,6 @@ func TestComputeTieredQuota_BoundaryTierCrossing(t *testing.T) {
 		BillingMode:   "tiered_expr",
 		ExprString:    exprStr,
 		ExprHash:      billingexpr.ExprHashString(exprStr),
-		GroupRatio:    1.0,
 		EstimatedTier: "small",
 		QuotaPerUnit:  500_000,
 	}
@@ -760,8 +747,8 @@ func TestComputeTieredQuota_BoundaryTierCrossing(t *testing.T) {
 	if r1.MatchedTier != "small" {
 		t.Errorf("at boundary: tier = %s, want small", r1.MatchedTier)
 	}
-	if r1.ActualQuotaAfterGroup != 50000 {
-		t.Errorf("at boundary: quota = %d, want 50000", r1.ActualQuotaAfterGroup)
+	if r1.ActualQuota != 50000 {
+		t.Errorf("at boundary: quota = %d, want 50000", r1.ActualQuota)
 	}
 
 	// Past boundary: large, p*2 = 200002; quota = 200002 / 1M * 500K = 100001
@@ -772,8 +759,8 @@ func TestComputeTieredQuota_BoundaryTierCrossing(t *testing.T) {
 	if r2.MatchedTier != "large" {
 		t.Errorf("past boundary: tier = %s, want large", r2.MatchedTier)
 	}
-	if r2.ActualQuotaAfterGroup != 100001 {
-		t.Errorf("past boundary: quota = %d, want 100001", r2.ActualQuotaAfterGroup)
+	if r2.ActualQuota != 100001 {
+		t.Errorf("past boundary: quota = %d, want 100001", r2.ActualQuota)
 	}
 	if !r2.CrossedTier {
 		t.Error("expected CrossedTier = true")

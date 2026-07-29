@@ -30,7 +30,6 @@ func makeSnapshot(expr string, groupRatio float64, estPrompt, estCompletion int)
 		BillingMode:               "tiered_expr",
 		ExprString:                expr,
 		ExprHash:                  billingexpr.ExprHashString(expr),
-		GroupRatio:                groupRatio,
 		EstimatedPromptTokens:     estPrompt,
 		EstimatedCompletionTokens: estCompletion,
 		QuotaPerUnit:              testQuotaPerUnit,
@@ -40,13 +39,12 @@ func makeSnapshot(expr string, groupRatio float64, estPrompt, estCompletion int)
 func makeRelayInfo(expr string, groupRatio float64, estPrompt, estCompletion int) *relaycommon.RelayInfo {
 	snap := makeSnapshot(expr, groupRatio, estPrompt, estCompletion)
 	cost, trace, _ := billingexpr.RunExpr(expr, billingexpr.TokenParams{P: float64(estPrompt), C: float64(estCompletion)})
-	quotaBeforeGroup := cost / 1_000_000 * testQuotaPerUnit
-	snap.EstimatedQuotaBeforeGroup = quotaBeforeGroup
-	snap.EstimatedQuotaAfterGroup = billingexpr.QuotaRound(quotaBeforeGroup * groupRatio)
+	quota := cost / 1_000_000 * testQuotaPerUnit
+	snap.EstimatedQuota = billingexpr.QuotaRound(quota)
 	snap.EstimatedTier = trace.MatchedTier
 	return &relaycommon.RelayInfo{
 		TieredBillingSnapshot: snap,
-		FinalPreConsumedQuota: snap.EstimatedQuotaAfterGroup,
+		FinalPreConsumedQuota: snap.EstimatedQuota,
 	}
 }
 
@@ -61,10 +59,9 @@ func TestTryTieredSettleUsesFrozenRequestInput(t *testing.T) {
 			BillingMode:               "tiered_expr",
 			ExprString:                exprStr,
 			ExprHash:                  billingexpr.ExprHashString(exprStr),
-			GroupRatio:                1.0,
 			EstimatedPromptTokens:     100,
 			EstimatedCompletionTokens: 0,
-			EstimatedQuotaAfterGroup:  50,
+			EstimatedQuota:            50,
 			QuotaPerUnit:              testQuotaPerUnit,
 		},
 		BillingRequestInput: &billingexpr.RequestInput{
@@ -89,11 +86,10 @@ func TestTryTieredSettleFallsBackToFrozenPreConsumeOnExprError(t *testing.T) {
 	relayInfo := &relaycommon.RelayInfo{
 		FinalPreConsumedQuota: 321,
 		TieredBillingSnapshot: &billingexpr.BillingSnapshot{
-			BillingMode:              "tiered_expr",
-			ExprString:               `invalid +-+ expr`,
-			ExprHash:                 billingexpr.ExprHashString(`invalid +-+ expr`),
-			GroupRatio:               1.0,
-			EstimatedQuotaAfterGroup: 123,
+			BillingMode:    "tiered_expr",
+			ExprString:     `invalid +-+ expr`,
+			ExprHash:       billingexpr.ExprHashString(`invalid +-+ expr`),
+			EstimatedQuota: 123,
 		},
 	}
 
@@ -309,28 +305,28 @@ func TestTryTieredSettle_NoRequestInput_FallsBackToDefault(t *testing.T) {
 // Group ratio tests
 // ---------------------------------------------------------------------------
 
-func TestTryTieredSettle_GroupRatioScaling(t *testing.T) {
+func TestTryTieredSettleIgnoresGroupMultiplier(t *testing.T) {
 	info := makeRelayInfo(flatExpr, 1.5, 1000, 500)
 
 	ok, quota, _ := TryTieredSettle(info, billingexpr.TokenParams{P: 1000, C: 500})
 	if !ok {
 		t.Fatal("expected tiered settle")
 	}
-	// exprCost = 7000, quotaBeforeGroup = 3500, afterGroup = round(3500 * 1.5) = 5250
-	if quota != 5250 {
-		t.Fatalf("quota = %d, want 5250", quota)
+	// exprCost = 7000, quota = round(3500); the legacy group argument is ignored.
+	if quota != 3500 {
+		t.Fatalf("quota = %d, want 3500", quota)
 	}
 }
 
-func TestTryTieredSettle_GroupRatioZero(t *testing.T) {
+func TestTryTieredSettleDoesNotAllowZeroGroupMultiplier(t *testing.T) {
 	info := makeRelayInfo(flatExpr, 0, 1000, 500)
 
 	ok, quota, _ := TryTieredSettle(info, billingexpr.TokenParams{P: 1000, C: 500})
 	if !ok {
 		t.Fatal("expected tiered settle")
 	}
-	if quota != 0 {
-		t.Fatalf("quota = %d, want 0 (group ratio = 0)", quota)
+	if quota != 3500 {
+		t.Fatalf("quota = %d, want 3500", quota)
 	}
 }
 
@@ -355,7 +351,6 @@ func TestTryTieredSettle_RatioMode_WrongBillingMode(t *testing.T) {
 			BillingMode: "ratio",
 			ExprString:  flatExpr,
 			ExprHash:    billingexpr.ExprHashString(flatExpr),
-			GroupRatio:  1.0,
 		},
 	}
 
@@ -371,7 +366,6 @@ func TestTryTieredSettle_RatioMode_EmptyBillingMode(t *testing.T) {
 			BillingMode: "",
 			ExprString:  flatExpr,
 			ExprHash:    billingexpr.ExprHashString(flatExpr),
-			GroupRatio:  1.0,
 		},
 	}
 
@@ -385,15 +379,14 @@ func TestTryTieredSettle_RatioMode_EmptyBillingMode(t *testing.T) {
 // Fallback tests
 // ---------------------------------------------------------------------------
 
-func TestTryTieredSettle_ErrorFallbackToEstimatedQuotaAfterGroup(t *testing.T) {
+func TestTryTieredSettle_ErrorFallbackToEstimatedQuota(t *testing.T) {
 	info := &relaycommon.RelayInfo{
 		FinalPreConsumedQuota: 0,
 		TieredBillingSnapshot: &billingexpr.BillingSnapshot{
-			BillingMode:              "tiered_expr",
-			ExprString:               `invalid expr!!!`,
-			ExprHash:                 billingexpr.ExprHashString(`invalid expr!!!`),
-			GroupRatio:               1.0,
-			EstimatedQuotaAfterGroup: 999,
+			BillingMode:    "tiered_expr",
+			ExprString:     `invalid expr!!!`,
+			ExprHash:       billingexpr.ExprHashString(`invalid expr!!!`),
+			EstimatedQuota: 999,
 		},
 	}
 
@@ -401,7 +394,7 @@ func TestTryTieredSettle_ErrorFallbackToEstimatedQuotaAfterGroup(t *testing.T) {
 	if !ok {
 		t.Fatal("expected tiered settle to apply")
 	}
-	// FinalPreConsumedQuota is 0, should fall back to EstimatedQuotaAfterGroup
+	// FinalPreConsumedQuota is 0, should fall back to EstimatedQuota
 	if quota != 999 {
 		t.Fatalf("quota = %d, want 999", quota)
 	}
@@ -418,7 +411,7 @@ func tieredQuota(exprStr string, usage *dto.Usage, isClaudeSemantic bool, groupR
 	usedVars := billingexpr.UsedVars(exprStr)
 	params := BuildTieredTokenParams(usage, isClaudeSemantic, usedVars)
 	cost, _, _ := billingexpr.RunExpr(exprStr, params)
-	return cost / 1_000_000 * testQuotaPerUnit * groupRatio
+	return cost / 1_000_000 * testQuotaPerUnit
 }
 
 func ratioQuota(usage *dto.Usage, isClaudeSemantic bool, modelRatio, completionRatio, cacheRatio, imageRatio, groupRatio float64) float64 {
@@ -431,7 +424,6 @@ func ratioQuota(usage *dto.Usage, isClaudeSemantic bool, modelRatio, completionR
 	dCompletionRatio := decimal.NewFromFloat(completionRatio)
 	dCacheRatio := decimal.NewFromFloat(cacheRatio)
 	dImageRatio := decimal.NewFromFloat(imageRatio)
-	dGroupRatio := decimal.NewFromFloat(groupRatio)
 
 	baseTokens := dPromptTokens
 	if !isClaudeSemantic {
@@ -444,7 +436,7 @@ func ratioQuota(usage *dto.Usage, isClaudeSemantic bool, modelRatio, completionR
 	imageTokensWithRatio := dImgTokens.Mul(dImageRatio)
 	promptQuota := baseTokens.Add(cachedTokensWithRatio).Add(imageTokensWithRatio)
 	completionQuota := dCompletionTokens.Mul(dCompletionRatio)
-	ratio := dModelRatio.Mul(dGroupRatio)
+	ratio := dModelRatio
 
 	result := promptQuota.Add(completionQuota).Mul(ratio)
 	f, _ := result.Float64()

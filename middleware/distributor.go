@@ -450,7 +450,15 @@ func SetupContextForSelectedChannel(c *gin.Context, channel *model.Channel, mode
 	common.SetContextKey(c, constant.ContextKeyChannelType, channel.Type)
 	common.SetContextKey(c, constant.ContextKeyChannelCreateTime, channel.CreatedTime)
 	common.SetContextKey(c, constant.ContextKeyChannelSetting, channel.GetSetting())
-	common.SetContextKey(c, constant.ContextKeyChannelOtherSetting, channel.GetOtherSettings())
+	channelOtherSettings := channel.GetOtherSettings()
+	if channelOtherSettings.UpstreamBilling != nil && channelOtherSettings.UpstreamBilling.CredentialID > 0 {
+		resolvedBillingSettings, err := model.ResolveChannelUpstreamBillingSettings(channel)
+		if err != nil {
+			return types.NewError(fmt.Errorf("failed to resolve upstream billing account: %w", err), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+		}
+		channelOtherSettings.UpstreamBilling = resolvedBillingSettings
+	}
+	common.SetContextKey(c, constant.ContextKeyChannelOtherSetting, channelOtherSettings)
 	paramOverride := channel.GetParamOverride()
 	headerOverride := channel.GetHeaderOverride()
 	if mergedParam, applied := service.ApplyChannelAffinityOverrideTemplate(c, paramOverride); applied {

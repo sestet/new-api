@@ -53,7 +53,16 @@ export interface CommonLogFilters extends CommonFilters {
   username?: string
   requestId?: string
   upstreamRequestId?: string
+  billingStatus?: UpstreamBillingStatusFilter
 }
+
+export type UpstreamBillingStatusFilter =
+  | 'all'
+  | 'exact'
+  | 'waiting'
+  | 'estimated'
+  | 'pending'
+  | 'failed'
 
 /**
  * Drawing logs specific filters
@@ -135,7 +144,40 @@ export interface LogOtherData {
       original: number
       clamped: number
     }
+    group_billing?: {
+      user_group?: string
+      using_group?: string
+      ratio?: number
+      ratio_source?: string
+    }
+    upstream_billing?: {
+      credential_id?: number
+      provider?: string
+      status?: string
+      upstream_request_id?: string
+      identity_ambiguous?: boolean
+      upstream_cost_usd?: string
+      upstream_quota?: number
+      upstream_cost_quota?: number
+      margin_quota?: number
+      estimated_quota?: number
+      charged_quota?: number
+      user_group?: string
+      using_group?: string
+      group_ratio?: string
+      group_ratio_source?: string
+      quota_per_unit?: string
+      attempts?: number
+      adjustment_quota?: number
+      wallet_adjustment?: number
+      revision_count?: number
+      last_checked_at?: number
+      recheck_until?: number
+      error?: string
+      background_reconciled?: boolean
+    }
   }
+  upstream_billing_status?: string
   // Language-independent operation descriptor (audit/login logs).
   // Frontend renders localized content from action + params via i18n templates.
   op?: {
@@ -170,8 +212,6 @@ export interface LogOtherData {
   model_ratio?: number
   completion_ratio?: number
   model_price?: number
-  group_ratio?: number
-  user_group_ratio?: number
   cache_ratio?: number
   cache_creation_ratio?: number
   cache_creation_ratio_5m?: number
@@ -233,6 +273,7 @@ export interface LogOtherData {
   subscription_consumed?: number
   subscription_remain?: number
   subscription_total?: number
+  wallet_quota_deducted?: number
 }
 
 /**
@@ -242,6 +283,11 @@ export interface LogStatistics {
   quota: number
   rpm: number
   tpm: number
+  request_count: number
+  exact: number
+  estimated: number
+  pending: number
+  failed: number
 }
 
 // ============================================================================
@@ -313,6 +359,7 @@ export interface GetLogsParams {
   group?: string
   request_id?: string
   upstream_request_id?: string
+  billing_status?: UpstreamBillingStatusFilter
 }
 
 export interface GetLogsResponse {
@@ -337,6 +384,7 @@ export interface GetLogStatsParams {
   group?: string
   request_id?: string
   upstream_request_id?: string
+  billing_status?: UpstreamBillingStatusFilter
 }
 
 export interface GetLogStatsResponse {

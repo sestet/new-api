@@ -798,7 +798,7 @@ export function PaymentSettingsSection({
 
   return (
     <SettingsSection title={t('Payment Gateway')}>
-      {!complianceConfirmed ? (
+      {!complianceConfirmed && (
         <Alert variant='destructive' className='mb-6'>
           <ShieldAlert className='h-4 w-4' />
           <AlertTitle>{t('Compliance confirmation required')}</AlertTitle>
@@ -826,20 +826,6 @@ export function PaymentSettingsSection({
               {t('Confirm compliance')}
             </Button>
           </AlertAction>
-        </Alert>
-      ) : (
-        <Alert className='mb-6'>
-          <AlertTitle>{t('Compliance confirmed')}</AlertTitle>
-          <AlertDescription>
-            {t('Confirmed at {{time}} by user #{{userId}}', {
-              time: complianceDefaults.confirmedAt
-                ? new Date(
-                    complianceDefaults.confirmedAt * 1000
-                  ).toLocaleString()
-                : '-',
-              userId: complianceDefaults.confirmedBy || '-',
-            })}
-          </AlertDescription>
         </Alert>
       )}
 
@@ -1570,7 +1556,7 @@ export function PaymentSettingsSection({
                         ) : (
                           <Textarea
                             rows={4}
-                            placeholder='[{"name":"Basic","productId":"prod_xxx","price":10,"quota":500000,"currency":"USD"}]'
+                            placeholder='[{"name":"Basic","productId":"prod_xxx","price":10,"quota":100000000,"currency":"USD"}]'
                             {...field}
                             onChange={(event) =>
                               field.onChange(event.target.value)

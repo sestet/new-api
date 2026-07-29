@@ -38,6 +38,8 @@ import type {
   SearchChannelsParams,
   SearchChannelsResponse,
   TagOperationParams,
+  UpstreamBillingAccount,
+  UpstreamBillingAccountInput,
 } from './types'
 
 const channelActionConfig = (
@@ -134,6 +136,141 @@ export async function updateChannel(
   const res = await api.put(
     '/api/channel/',
     { id, ...data },
+    channelActionConfig()
+  )
+  return res.data
+}
+
+export type UpstreamBillingDetectionResponse = {
+  success: boolean
+  message?: string
+  data?: {
+    provider: 'new_api' | 'sub2api'
+    api_base_url: string
+    quota_per_unit?: string
+    access_token?: string
+    refresh_token?: string
+    access_token_issued_at?: number
+    access_token_expires_at?: number
+  }
+}
+
+export async function detectUpstreamBilling(data: {
+  channel_id?: number
+  base_url?: string
+  proxy?: string
+  settings: {
+    enabled: boolean
+    provider: 'auto' | 'new_api' | 'sub2api'
+    access_token: string
+    access_token_configured?: boolean
+    refresh_token?: string
+    refresh_token_configured?: boolean
+    access_token_issued_at?: number
+    access_token_expires_at?: number
+    user_id?: number
+    api_base_url?: string
+  }
+}): Promise<UpstreamBillingDetectionResponse> {
+  const res = await api.post(
+    '/api/channel/upstream_billing/detect',
+    data,
+    channelActionConfig()
+  )
+  return res.data
+}
+
+type UpstreamBillingAccountResponse = {
+  success: boolean
+  message?: string
+  data?: UpstreamBillingAccount
+}
+
+export const upstreamBillingAccountsQueryKey = [
+  'channels',
+  'upstream-billing-accounts',
+  'v3',
+] as const
+
+export async function getUpstreamBillingAccounts(
+  signal?: AbortSignal
+): Promise<{
+  success: boolean
+  message?: string
+  data?: UpstreamBillingAccount[]
+}> {
+  const res = await api.request(
+    channelActionConfig({
+      method: 'GET',
+      url: '/api/channel/upstream_billing/accounts',
+      params: { schema_version: 3 },
+      signal,
+      timeout: 10_000,
+      disableDuplicate: true,
+    })
+  )
+  return res.data
+}
+
+export async function createUpstreamBillingAccount(
+  data: UpstreamBillingAccountInput
+): Promise<UpstreamBillingAccountResponse> {
+  const res = await api.post(
+    '/api/channel/upstream_billing/accounts',
+    data,
+    channelActionConfig()
+  )
+  return res.data
+}
+
+export async function updateUpstreamBillingAccount(
+  id: number,
+  data: UpstreamBillingAccountInput
+): Promise<UpstreamBillingAccountResponse> {
+  const res = await api.put(
+    `/api/channel/upstream_billing/accounts/${id}`,
+    data,
+    channelActionConfig()
+  )
+  return res.data
+}
+
+export async function deleteUpstreamBillingAccount(
+  id: number
+): Promise<{ success: boolean; message?: string }> {
+  const res = await api.delete(
+    `/api/channel/upstream_billing/accounts/${id}`,
+    channelActionConfig()
+  )
+  return res.data
+}
+
+export async function testUpstreamBillingAccount(
+  id: number
+): Promise<UpstreamBillingDetectionResponse> {
+  const res = await api.post(
+    `/api/channel/upstream_billing/accounts/${id}/test`,
+    undefined,
+    channelActionConfig()
+  )
+  return res.data
+}
+
+export type UpstreamBillingReconcileResponse = {
+  success: boolean
+  message?: string
+  data?: {
+    task_id: string
+    status: string
+  }
+}
+
+export async function reconcileUpstreamBillingAccount(
+  id: number
+): Promise<UpstreamBillingReconcileResponse> {
+  const res = await api.post(
+    `/api/channel/upstream_billing/accounts/${id}/reconcile`,
+    undefined,
     channelActionConfig()
   )
   return res.data

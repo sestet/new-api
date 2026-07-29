@@ -33,13 +33,76 @@ func attachQuotaSaturationToOther(other map[string]interface{}, clamp *common.Qu
 	adminInfo["quota_saturation"] = clamp.AuditMap()
 }
 
+func AttachGroupRatioAudit(other map[string]interface{}, userGroup, usingGroup string, ratioInfo types.GroupRatioInfo) {
+	if other == nil || ratioInfo.Source == "" {
+		return
+	}
+	adminInfo, ok := other["admin_info"].(map[string]interface{})
+	if !ok || adminInfo == nil {
+		adminInfo = map[string]interface{}{}
+		other["admin_info"] = adminInfo
+	}
+	adminInfo["group_billing"] = map[string]interface{}{
+		"user_group":   userGroup,
+		"using_group":  usingGroup,
+		"ratio":        ratioInfo.GroupRatio,
+		"ratio_source": ratioInfo.Source,
+	}
+}
+
+// AttachUpstreamBillingAudit adds reconciliation state to a consume log payload.
+func AttachUpstreamBillingAudit(relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {
+	if relayInfo == nil || other == nil {
+		return
+	}
+	if audit := relayInfo.UpstreamBillingAudit; audit != nil && audit.Enabled {
+		other["upstream_billing_status"] = audit.Status
+		adminInfo, ok := other["admin_info"].(map[string]interface{})
+		if !ok || adminInfo == nil {
+			adminInfo = map[string]interface{}{}
+			other["admin_info"] = adminInfo
+		}
+		billingInfo := map[string]interface{}{
+			"provider":            audit.Provider,
+			"status":              audit.Status,
+			"upstream_request_id": audit.UpstreamRequestId,
+			"identity_ambiguous":  audit.IdentityAmbiguous,
+			"estimated_quota":     audit.EstimatedQuota,
+			"charged_quota":       audit.ChargedQuota,
+			"attempts":            audit.Attempts,
+			"user_group":          audit.UserGroup,
+			"using_group":         audit.UsingGroup,
+			"group_ratio":         audit.GroupRatio,
+			"group_ratio_source":  audit.GroupRatioSource,
+			"quota_per_unit":      audit.QuotaPerUnit,
+		}
+		if audit.CredentialId > 0 {
+			billingInfo["credential_id"] = audit.CredentialId
+		}
+		if audit.UpstreamCostUSD != "" {
+			billingInfo["upstream_cost_usd"] = audit.UpstreamCostUSD
+			billingInfo["upstream_cost_quota"] = audit.UpstreamCostQuota
+			billingInfo["margin_quota"] = audit.MarginQuota
+		}
+		if audit.UpstreamQuota != 0 {
+			billingInfo["upstream_quota"] = audit.UpstreamQuota
+		}
+		if audit.Error != "" {
+			billingInfo["error"] = audit.Error
+		}
+		adminInfo["upstream_billing"] = billingInfo
+	}
+}
+
 // attachQuotaSaturation records the request's quota clamp (if any) onto the
 // consume log's other.admin_info and emits a request-correlated backend audit
 // line. Called right before RecordConsumeLog on the text/audio/wss paths.
 func attachQuotaSaturation(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {
-	if relayInfo == nil {
+	if relayInfo == nil || other == nil {
 		return
 	}
+	AttachUpstreamBillingAudit(relayInfo, other)
+	AttachGroupRatioAudit(other, relayInfo.UserGroup, relayInfo.UsingGroup, relayInfo.PriceData.GroupRatioInfo)
 	clamp := relayInfo.QuotaClamp
 	if clamp == nil {
 		return
@@ -68,16 +131,14 @@ func appendRequestPath(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, other
 	}
 }
 
-func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, modelRatio, groupRatio, completionRatio float64,
-	cacheTokens int, cacheRatio float64, modelPrice float64, userGroupRatio float64) map[string]interface{} {
+func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, modelRatio, completionRatio float64,
+	cacheTokens int, cacheRatio float64, modelPrice float64) map[string]interface{} {
 	other := make(map[string]interface{})
 	other["model_ratio"] = modelRatio
-	other["group_ratio"] = groupRatio
 	other["completion_ratio"] = completionRatio
 	other["cache_tokens"] = cacheTokens
 	other["cache_ratio"] = cacheRatio
 	other["model_price"] = modelPrice
-	other["user_group_ratio"] = userGroupRatio
 	other["frt"] = float64(relayInfo.FirstResponseTime.UnixMilli() - relayInfo.StartTime.UnixMilli())
 	if relayInfo.ReasoningEffort != "" {
 		other["reasoning_effort"] = relayInfo.ReasoningEffort
@@ -200,8 +261,7 @@ func appendBillingInfo(relayInfo *relaycommon.RelayInfo, other map[string]interf
 		if consumed > 0 {
 			other["subscription_consumed"] = consumed
 		}
-		// Wallet quota is not deducted when billed from subscription.
-		other["wallet_quota_deducted"] = 0
+		other["wallet_quota_deducted"] = relayInfo.WalletQuotaDeducted
 	}
 }
 
@@ -244,8 +304,8 @@ func appendFinalRequestFormat(relayInfo *relaycommon.RelayInfo, other map[string
 	}
 }
 
-func GenerateWssOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage *dto.RealtimeUsage, modelRatio, groupRatio, completionRatio, audioRatio, audioCompletionRatio, modelPrice, userGroupRatio float64) map[string]interface{} {
-	info := GenerateTextOtherInfo(ctx, relayInfo, modelRatio, groupRatio, completionRatio, 0, 0.0, modelPrice, userGroupRatio)
+func GenerateWssOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage *dto.RealtimeUsage, modelRatio, completionRatio, audioRatio, audioCompletionRatio, modelPrice float64) map[string]interface{} {
+	info := GenerateTextOtherInfo(ctx, relayInfo, modelRatio, completionRatio, 0, 0.0, modelPrice)
 	info["ws"] = true
 	info["audio_input"] = usage.InputTokenDetails.AudioTokens
 	info["audio_output"] = usage.OutputTokenDetails.AudioTokens
@@ -256,8 +316,8 @@ func GenerateWssOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	return info
 }
 
-func GenerateAudioOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage *dto.Usage, modelRatio, groupRatio, completionRatio, audioRatio, audioCompletionRatio, modelPrice, userGroupRatio float64) map[string]interface{} {
-	info := GenerateTextOtherInfo(ctx, relayInfo, modelRatio, groupRatio, completionRatio, 0, 0.0, modelPrice, userGroupRatio)
+func GenerateAudioOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage *dto.Usage, modelRatio, completionRatio, audioRatio, audioCompletionRatio, modelPrice float64) map[string]interface{} {
+	info := GenerateTextOtherInfo(ctx, relayInfo, modelRatio, completionRatio, 0, 0.0, modelPrice)
 	info["audio"] = true
 	info["audio_input"] = usage.PromptTokensDetails.AudioTokens
 	info["audio_output"] = usage.CompletionTokenDetails.AudioTokens
@@ -268,13 +328,13 @@ func GenerateAudioOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, 
 	return info
 }
 
-func GenerateClaudeOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, modelRatio, groupRatio, completionRatio float64,
+func GenerateClaudeOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, modelRatio, completionRatio float64,
 	cacheTokens int, cacheRatio float64,
 	cacheCreationTokens int, cacheCreationRatio float64,
 	cacheCreationTokens5m int, cacheCreationRatio5m float64,
 	cacheCreationTokens1h int, cacheCreationRatio1h float64,
-	modelPrice float64, userGroupRatio float64) map[string]interface{} {
-	info := GenerateTextOtherInfo(ctx, relayInfo, modelRatio, groupRatio, completionRatio, cacheTokens, cacheRatio, modelPrice, userGroupRatio)
+	modelPrice float64) map[string]interface{} {
+	info := GenerateTextOtherInfo(ctx, relayInfo, modelRatio, completionRatio, cacheTokens, cacheRatio, modelPrice)
 	info["claude"] = true
 	info["cache_creation_tokens"] = cacheCreationTokens
 	info["cache_creation_ratio"] = cacheCreationRatio
@@ -292,10 +352,6 @@ func GenerateClaudeOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo,
 func GenerateMjOtherInfo(relayInfo *relaycommon.RelayInfo, priceData types.PriceData) map[string]interface{} {
 	other := make(map[string]interface{})
 	other["model_price"] = priceData.ModelPrice
-	other["group_ratio"] = priceData.GroupRatioInfo.GroupRatio
-	if priceData.GroupRatioInfo.HasSpecialRatio {
-		other["user_group_ratio"] = priceData.GroupRatioInfo.GroupSpecialRatio
-	}
 	appendRequestPath(nil, relayInfo, other)
 	return other
 }

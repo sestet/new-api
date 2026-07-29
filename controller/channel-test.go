@@ -246,6 +246,13 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 
 	info.IsChannelTest = true
 	info.InitChannelMeta(c)
+	c.Set(common.RequestIdKey, info.RequestId)
+	info.BillingSource = service.BillingSourceChannelTest
+	if helper.ShouldUseUpstreamBillingReconciliation(c, info) {
+		upstreamBillingRequestID := common.NewRequestId()
+		c.Set(common.UpstreamRequestIdKey, upstreamBillingRequestID)
+		c.Set(common.UpstreamBillingRequestIdKey, upstreamBillingRequestID)
+	}
 
 	err = attachTestBillingRequestInput(info, request)
 	if err != nil {
@@ -493,6 +500,7 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 	info.SetEstimatePromptTokens(usage.PromptTokens)
 
 	quota, tieredResult := settleTestQuota(info, priceData, usage)
+	quota = service.ResolveUpstreamBillingQuota(c, info, quota, usage)
 	tok := time.Now()
 	milliseconds := tok.Sub(tik).Milliseconds()
 	consumedTime := float64(milliseconds) / 1000.0
@@ -531,7 +539,7 @@ func attachTestBillingRequestInput(info *relaycommon.RelayInfo, request dto.Requ
 	return nil
 }
 
-func settleTestQuota(info *relaycommon.RelayInfo, priceData types.PriceData, usage *dto.Usage) (int, *billingexpr.TieredResult) {
+func settleTestQuota(info *relaycommon.RelayInfo, priceData types.PriceData, usage *dto.Usage) (int64, *billingexpr.TieredResult) {
 	if usage != nil && info != nil && info.TieredBillingSnapshot != nil {
 		isClaudeUsageSemantic := usage.UsageSemantic == "anthropic" || info.GetFinalRequestRelayFormat() == types.RelayFormatClaude
 		usedVars := billingexpr.UsedVars(info.TieredBillingSnapshot.ExprString)
@@ -540,25 +548,28 @@ func settleTestQuota(info *relaycommon.RelayInfo, priceData types.PriceData, usa
 		}
 	}
 
-	quota := 0
+	var quota int64
+	groupRatio := priceData.BillingGroupRatio()
 	if !priceData.UsePrice {
-		quota = usage.PromptTokens + int(math.Round(float64(usage.CompletionTokens)*priceData.CompletionRatio))
-		quota = int(math.Round(float64(quota) * priceData.ModelRatio))
+		quota = common.QuotaRound(float64(usage.PromptTokens) + math.Round(float64(usage.CompletionTokens)*priceData.CompletionRatio))
+		quota = common.QuotaRound(float64(quota) * priceData.ModelRatio * groupRatio * common.QuotaPerUnit / ratio_setting.ModelRatioTokensPerUSD)
 		if priceData.ModelRatio != 0 && quota <= 0 {
 			quota = 1
 		}
 		return quota, nil
 	}
 
-	return int(priceData.ModelPrice * common.QuotaPerUnit), nil
+	return common.QuotaFromFloat(priceData.ModelPrice * groupRatio * common.QuotaPerUnit), nil
 }
 
 func buildTestLogOther(c *gin.Context, info *relaycommon.RelayInfo, priceData types.PriceData, usage *dto.Usage, tieredResult *billingexpr.TieredResult) map[string]interface{} {
-	other := service.GenerateTextOtherInfo(c, info, priceData.ModelRatio, priceData.GroupRatioInfo.GroupRatio, priceData.CompletionRatio,
-		usage.PromptTokensDetails.CachedTokens, priceData.CacheRatio, priceData.ModelPrice, priceData.GroupRatioInfo.GroupSpecialRatio)
+	other := service.GenerateTextOtherInfo(c, info, priceData.ModelRatio, priceData.CompletionRatio,
+		usage.PromptTokensDetails.CachedTokens, priceData.CacheRatio, priceData.ModelPrice)
 	if tieredResult != nil {
 		service.InjectTieredBillingInfo(other, info, tieredResult)
 	}
+	service.AttachGroupRatioAudit(other, info.UserGroup, info.UsingGroup, priceData.GroupRatioInfo)
+	service.AttachUpstreamBillingAudit(info, other)
 	return other
 }
 

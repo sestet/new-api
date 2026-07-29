@@ -37,6 +37,7 @@ import {
   Plus,
   Eye,
   RefreshCw,
+  ReceiptText,
   Code,
   Route,
   Settings,
@@ -133,7 +134,9 @@ import {
   getChannelKey,
   getGroups,
   getPrefillGroups,
+  getUpstreamBillingAccounts,
   refreshCodexCredential,
+  upstreamBillingAccountsQueryKey,
 } from '../../api'
 import {
   ADD_MODE_OPTIONS,
@@ -186,6 +189,7 @@ import {
   ChannelApiAccessSection,
   ChannelAuthSection,
   ChannelBasicSection,
+  ChannelBillingSection,
   ChannelEditorLoadingState,
   ChannelModelsSection,
 } from './sections'
@@ -242,12 +246,14 @@ const ADVANCED_SETTINGS_EXPANDED_KEY = 'channel-advanced-settings-expanded'
 const CHANNEL_EDITOR_SECTION_IDS = {
   identity: 'channel-section-identity',
   credentials: 'channel-section-credentials',
+  billing: 'channel-section-billing',
   models: 'channel-section-models',
   advanced: 'channel-section-advanced',
 } as const
 const CHANNEL_EDITOR_MAIN_SECTION_IDS = [
   CHANNEL_EDITOR_SECTION_IDS.identity,
   CHANNEL_EDITOR_SECTION_IDS.credentials,
+  CHANNEL_EDITOR_SECTION_IDS.billing,
   CHANNEL_EDITOR_SECTION_IDS.models,
   CHANNEL_EDITOR_SECTION_IDS.advanced,
 ]
@@ -297,6 +303,22 @@ const SENSITIVE_FORM_FIELDS = [
   'upstream_model_update_check_enabled',
   'upstream_model_update_auto_sync_enabled',
   'upstream_model_update_ignored_models',
+  'upstream_billing_enabled',
+  'upstream_billing_credential_id',
+  'upstream_billing_provider',
+  'upstream_billing_access_token',
+  'upstream_billing_access_token_configured',
+  'upstream_billing_refresh_token',
+  'upstream_billing_refresh_token_configured',
+  'upstream_billing_access_token_issued_at',
+  'upstream_billing_access_token_expires_at',
+  'upstream_billing_user_id',
+  'upstream_billing_api_base_url',
+  'upstream_billing_detected_provider',
+  'upstream_billing_recheck_enabled',
+  'upstream_billing_recheck_window_hours',
+  'upstream_billing_token_id',
+  'upstream_billing_token_name',
 ] satisfies (keyof ChannelFormValues)[]
 
 function readAdvancedSettingsPreference(): boolean {
@@ -664,6 +686,13 @@ export function ChannelMutateDrawer({
     queryFn: getGroups,
   })
 
+  const upstreamBillingAccountsQuery = useQuery({
+    queryKey: upstreamBillingAccountsQueryKey,
+    queryFn: ({ signal }) => getUpstreamBillingAccounts(signal),
+    enabled: open,
+    retry: false,
+  })
+
   // Fetch all available models
   const { data: allModelsData } = useQuery({
     queryKey: ['channel_models'],
@@ -744,6 +773,11 @@ export function ChannelMutateDrawer({
     'disable_task_polling_sleep'
   )
   const currentProxy = form.watch('proxy')
+  const currentUpstreamBillingCredentialId =
+    form.watch('upstream_billing_credential_id') || 0
+  const currentUpstreamBillingRecheckEnabled = form.watch(
+    'upstream_billing_recheck_enabled'
+  )
   const currentSystemPrompt = form.watch('system_prompt')
   const currentSystemPromptOverride = form.watch('system_prompt_override')
   const currentAllowServiceTier = form.watch('allow_service_tier')
@@ -759,6 +793,37 @@ export function ChannelMutateDrawer({
   const currentUpstreamModelUpdateIgnoredModels = form.watch(
     'upstream_model_update_ignored_models'
   )
+  const upstreamBillingAccounts = useMemo(
+    () => upstreamBillingAccountsQuery.data?.data || [],
+    [upstreamBillingAccountsQuery.data?.data]
+  )
+  const selectedUpstreamBillingAccount = upstreamBillingAccounts.find(
+    (account) => account.id === currentUpstreamBillingCredentialId
+  )
+  const upstreamBillingAccountOptions = useMemo(() => {
+    const options = [
+      {
+        value: '0',
+        label: t('Not bound'),
+      },
+      ...upstreamBillingAccounts.map((account) => ({
+        value: String(account.id),
+        label: `${account.name} · ${account.provider}`,
+      })),
+    ]
+    if (
+      currentUpstreamBillingCredentialId > 0 &&
+      !upstreamBillingAccounts.some(
+        (account) => account.id === currentUpstreamBillingCredentialId
+      )
+    ) {
+      options.push({
+        value: String(currentUpstreamBillingCredentialId),
+        label: `#${currentUpstreamBillingCredentialId}`,
+      })
+    }
+    return options
+  }, [currentUpstreamBillingCredentialId, t, upstreamBillingAccounts])
   const shouldPreviewUnsavedModels =
     !isEditing ||
     (currentType === CHANNEL_TYPE_ADVANCED_CUSTOM && canEditSensitive)
@@ -953,6 +1018,11 @@ export function ChannelMutateDrawer({
     formErrors.aws_key_type ||
     formErrors.azure_responses_version
   )
+  const billingHasErrors = Boolean(
+    formErrors.upstream_billing_credential_id ||
+    formErrors.upstream_billing_recheck_enabled ||
+    formErrors.upstream_billing_recheck_window_hours
+  )
   const modelsHaveErrors = Boolean(
     formErrors.models || formErrors.group || formErrors.model_mapping
   )
@@ -987,6 +1057,15 @@ export function ChannelMutateDrawer({
     credentialsHaveErrors,
     credentialsComplete
   )
+  let billingStatus: ChannelEditorSectionStatus = 'idle'
+  let billingStatusLabel = t('Not bound')
+  if (billingHasErrors) {
+    billingStatus = 'error'
+    billingStatusLabel = t('Error')
+  } else if (currentUpstreamBillingCredentialId > 0) {
+    billingStatus = 'configured'
+    billingStatusLabel = t('Bound')
+  }
   const modelsStatus = getCompletionStatus(modelsHaveErrors, modelsComplete)
   const advancedStatus: ChannelEditorSectionStatus = advancedHaveErrors
     ? 'error'
@@ -1097,6 +1176,14 @@ export function ChannelMutateDrawer({
       statusLabel: getSectionStatusLabel(credentialsStatus, t),
       status: credentialsStatus,
       icon: <KeyRound className='h-4 w-4' aria-hidden='true' />,
+    },
+    {
+      id: CHANNEL_EDITOR_SECTION_IDS.billing,
+      title: t('Exact billing'),
+      description: billingStatusLabel,
+      statusLabel: billingStatusLabel,
+      status: billingStatus,
+      icon: <ReceiptText className='h-4 w-4' aria-hidden='true' />,
     },
     {
       id: CHANNEL_EDITOR_SECTION_IDS.models,
@@ -1540,6 +1627,7 @@ export function ChannelMutateDrawer({
   // Handle successful submission
   const handleSuccess = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: channelsQueryKeys.lists() })
+    queryClient.invalidateQueries({ queryKey: upstreamBillingAccountsQueryKey })
     if (channelId) {
       queryClient.invalidateQueries({
         queryKey: channelsQueryKeys.detail(channelId),
@@ -3231,6 +3319,193 @@ export function ChannelMutateDrawer({
                           </fieldset>
                         </div>
                       </ChannelApiAccessSection>
+                    </div>
+
+                    {/* ── Exact Billing ── */}
+                    <div
+                      id={CHANNEL_EDITOR_SECTION_IDS.billing}
+                      className='scroll-mt-4'
+                    >
+                      <ChannelBillingSection>
+                        <div className='border-border/60 bg-muted/10 rounded-lg border p-4'>
+                          <fieldset
+                            disabled={sensitiveLocked}
+                            className='space-y-4 disabled:opacity-60'
+                          >
+                            <FormField
+                              control={form.control}
+                              name='upstream_billing_credential_id'
+                              render={({ field }) => (
+                                <FormItem>
+                                  <FormLabel>{t('Upstream account')}</FormLabel>
+                                  <Select
+                                    items={upstreamBillingAccountOptions}
+                                    value={String(field.value || 0)}
+                                    disabled={
+                                      upstreamBillingAccountsQuery.isLoading
+                                    }
+                                    onValueChange={(value) => {
+                                      const credentialId = Number(value)
+                                      field.onChange(credentialId)
+                                      form.setValue(
+                                        'upstream_billing_enabled',
+                                        credentialId > 0,
+                                        {
+                                          shouldDirty: true,
+                                          shouldValidate: true,
+                                        }
+                                      )
+                                    }}
+                                  >
+                                    <FormControl>
+                                      <SelectTrigger className='w-full'>
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                    </FormControl>
+                                    <SelectContent>
+                                      <SelectGroup>
+                                        <SelectItem value='0'>
+                                          {t('Not bound')}
+                                        </SelectItem>
+                                        {upstreamBillingAccounts.map(
+                                          (account) => (
+                                            <SelectItem
+                                              key={account.id}
+                                              value={String(account.id)}
+                                              disabled={
+                                                !account.enabled &&
+                                                account.id !==
+                                                  currentUpstreamBillingCredentialId
+                                              }
+                                            >
+                                              {account.name} ·{' '}
+                                              {account.provider}
+                                              {!account.enabled &&
+                                                ` (${t('Disabled')})`}
+                                            </SelectItem>
+                                          )
+                                        )}
+                                        {currentUpstreamBillingCredentialId >
+                                          0 &&
+                                          !selectedUpstreamBillingAccount && (
+                                            <SelectItem
+                                              value={String(
+                                                currentUpstreamBillingCredentialId
+                                              )}
+                                              disabled
+                                            >
+                                              #
+                                              {
+                                                currentUpstreamBillingCredentialId
+                                              }
+                                            </SelectItem>
+                                          )}
+                                      </SelectGroup>
+                                    </SelectContent>
+                                  </Select>
+                                  <FormDescription>
+                                    {upstreamBillingAccountsQuery.isLoading
+                                      ? t('Loading...')
+                                      : t(
+                                          'Choose the upstream account used for exact billing.'
+                                        )}
+                                  </FormDescription>
+                                  {upstreamBillingAccountsQuery.isError && (
+                                    <div className='flex items-center gap-2'>
+                                      <span className='text-destructive text-xs'>
+                                        {t('Loading failed')}
+                                      </span>
+                                      <Button
+                                        type='button'
+                                        variant='ghost'
+                                        size='sm'
+                                        onClick={() =>
+                                          upstreamBillingAccountsQuery.refetch()
+                                        }
+                                      >
+                                        <RefreshCw data-icon='inline-start' />
+                                        {t('Retry')}
+                                      </Button>
+                                    </div>
+                                  )}
+                                  {!upstreamBillingAccountsQuery.isLoading &&
+                                    !upstreamBillingAccountsQuery.isError &&
+                                    upstreamBillingAccounts.length === 0 && (
+                                      <p className='text-muted-foreground text-xs'>
+                                        {t('No upstream accounts configured')}
+                                      </p>
+                                    )}
+                                  {selectedUpstreamBillingAccount && (
+                                    <p className='text-muted-foreground truncate text-xs'>
+                                      {
+                                        selectedUpstreamBillingAccount.api_base_url
+                                      }
+                                    </p>
+                                  )}
+                                  <FormMessage />
+                                </FormItem>
+                              )}
+                            />
+
+                            {currentUpstreamBillingCredentialId > 0 && (
+                              <div className='grid gap-4 sm:grid-cols-2'>
+                                <FormField
+                                  control={form.control}
+                                  name='upstream_billing_recheck_enabled'
+                                  render={({ field }) => (
+                                    <FormItem
+                                      className={sideDrawerSwitchItemClassName()}
+                                    >
+                                      <FormLabel>
+                                        {t('Recheck exact upstream bills')}
+                                      </FormLabel>
+                                      <FormControl>
+                                        <Switch
+                                          checked={field.value !== false}
+                                          onCheckedChange={field.onChange}
+                                        />
+                                      </FormControl>
+                                    </FormItem>
+                                  )}
+                                />
+                                <FormField
+                                  control={form.control}
+                                  name='upstream_billing_recheck_window_hours'
+                                  render={({ field }) => (
+                                    <FormItem>
+                                      <FormLabel>
+                                        {t('Recheck window')}
+                                      </FormLabel>
+                                      <FormControl>
+                                        <Input
+                                          type='number'
+                                          min={1}
+                                          max={720}
+                                          step={1}
+                                          disabled={
+                                            currentUpstreamBillingRecheckEnabled ===
+                                            false
+                                          }
+                                          value={field.value || 24}
+                                          onChange={(event) =>
+                                            field.onChange(
+                                              Number(event.target.value)
+                                            )
+                                          }
+                                        />
+                                      </FormControl>
+                                      <FormDescription>
+                                        {t('hours')}
+                                      </FormDescription>
+                                      <FormMessage />
+                                    </FormItem>
+                                  )}
+                                />
+                              </div>
+                            )}
+                          </fieldset>
+                        </div>
+                      </ChannelBillingSection>
                     </div>
 
                     {/* ── Models & Groups ── */}

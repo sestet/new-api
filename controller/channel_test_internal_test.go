@@ -149,7 +149,6 @@ func TestSettleTestQuotaUsesTieredBilling(t *testing.T) {
 			BillingMode:   "tiered_expr",
 			ExprString:    `param("stream") == true ? tier("stream", p * 3) : tier("base", p * 2)`,
 			ExprHash:      billingexpr.ExprHashString(`param("stream") == true ? tier("stream", p * 3) : tier("base", p * 2)`),
-			GroupRatio:    1,
 			EstimatedTier: "stream",
 			QuotaPerUnit:  common.QuotaPerUnit,
 			ExprVersion:   1,
@@ -166,9 +165,26 @@ func TestSettleTestQuotaUsesTieredBilling(t *testing.T) {
 		PromptTokens: 1000,
 	})
 
-	require.Equal(t, 1500, quota)
+	require.Equal(t, int64(300_000), quota)
 	require.NotNil(t, result)
 	require.Equal(t, "stream", result.MatchedTier)
+}
+
+func TestSettleTestQuotaScalesRatioBillingToCurrentQuotaPrecision(t *testing.T) {
+	originalQuotaPerUnit := common.QuotaPerUnit
+	common.QuotaPerUnit = 100_000_000
+	t.Cleanup(func() { common.QuotaPerUnit = originalQuotaPerUnit })
+
+	quota, result := settleTestQuota(&relaycommon.RelayInfo{}, types.PriceData{
+		ModelRatio:      2.5,
+		CompletionRatio: 6,
+	}, &dto.Usage{
+		PromptTokens:     7,
+		CompletionTokens: 13,
+	})
+
+	assert.Equal(t, int64(42_500), quota)
+	assert.Nil(t, result)
 }
 
 func TestBuildTestLogOtherInjectsTieredInfo(t *testing.T) {
@@ -182,9 +198,7 @@ func TestBuildTestLogOtherInjectsTieredInfo(t *testing.T) {
 		},
 		ChannelMeta: &relaycommon.ChannelMeta{},
 	}
-	priceData := types.PriceData{
-		GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1},
-	}
+	priceData := types.PriceData{}
 	usage := &dto.Usage{
 		PromptTokensDetails: dto.InputTokenDetails{
 			CachedTokens: 12,
@@ -198,6 +212,37 @@ func TestBuildTestLogOtherInjectsTieredInfo(t *testing.T) {
 	require.Equal(t, "tiered_expr", other["billing_mode"])
 	require.Equal(t, "base", other["matched_tier"])
 	require.NotEmpty(t, other["expr_b64"])
+}
+
+func TestBuildTestLogOtherIncludesUpstreamBillingAudit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	info := &relaycommon.RelayInfo{
+		BillingSource: service.BillingSourceChannelTest,
+		ChannelMeta:   &relaycommon.ChannelMeta{},
+		UpstreamBillingAudit: &relaycommon.UpstreamBillingAudit{
+			Enabled:           true,
+			CredentialId:      17,
+			Provider:          "sub2api",
+			Status:            model.UpstreamBillingStatusExact,
+			UpstreamRequestId: "upstream-channel-test",
+			UpstreamCostUSD:   "0.00000425",
+			ChargedQuota:      425,
+		},
+	}
+
+	other := buildTestLogOther(ctx, info, types.PriceData{}, &dto.Usage{}, nil)
+
+	assert.Equal(t, service.BillingSourceChannelTest, other["billing_source"])
+	assert.Equal(t, model.UpstreamBillingStatusExact, other["upstream_billing_status"])
+	adminInfo, ok := other["admin_info"].(map[string]interface{})
+	require.True(t, ok)
+	billingInfo, ok := adminInfo["upstream_billing"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, 17, billingInfo["credential_id"])
+	assert.Equal(t, "0.00000425", billingInfo["upstream_cost_usd"])
+	assert.Equal(t, int64(425), billingInfo["charged_quota"])
 }
 
 func TestResolveChannelTestUserIDUsesRequestUser(t *testing.T) {

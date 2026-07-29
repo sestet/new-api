@@ -22,6 +22,7 @@ import { CheckinSettingsSection } from '../general/checkin-settings-section'
 import { PricingSection } from '../general/pricing-section'
 import { QuotaSettingsSection } from '../general/quota-settings-section'
 import { PaymentSettingsSection } from '../integrations/payment-settings-section'
+import { GroupBillingSection } from '../models/group-billing-section'
 import { RatioSettingsCard } from '../models/ratio-settings-card'
 import type { BillingSettings } from '../types'
 import { createSectionRegistry } from '../utils/section-registry'
@@ -38,17 +39,6 @@ const getModelDefaults = (settings: BillingSettings) => ({
   ExposeRatioEnabled: settings.ExposeRatioEnabled,
   BillingMode: settings['billing_setting.billing_mode'],
   BillingExpr: settings['billing_setting.billing_expr'],
-})
-
-const getGroupDefaults = (settings: BillingSettings) => ({
-  TopupGroupRatio: settings.TopupGroupRatio,
-  GroupRatio: settings.GroupRatio,
-  UserUsableGroups: settings.UserUsableGroups,
-  GroupGroupRatio: settings.GroupGroupRatio,
-  AutoGroups: settings.AutoGroups,
-  DefaultUseAutoGroup: settings.DefaultUseAutoGroup,
-  GroupSpecialUsableGroup:
-    settings['group_ratio_setting.group_special_usable_group'],
 })
 
 const BILLING_SECTIONS = [
@@ -72,8 +62,9 @@ const BILLING_SECTIONS = [
           },
         }}
         complianceConfirmed={
-          (settings['payment_setting.compliance_confirmed'] ?? false) &&
-          settings['payment_setting.compliance_terms_version'] === 'v1'
+          (settings['payment_setting.compliance_confirmed'] ?? true) &&
+          (settings['payment_setting.compliance_terms_version'] ?? 'v1') ===
+            'v1'
         }
       />
     ),
@@ -108,22 +99,22 @@ const BILLING_SECTIONS = [
       <RatioSettingsCard
         titleKey='Model Pricing'
         modelDefaults={getModelDefaults(settings)}
-        groupDefaults={getGroupDefaults(settings)}
         toolPricesDefault={settings['tool_price_setting.prices']}
         visibleTabs={['models', 'unset-models', 'tool-prices', 'upstream-sync']}
       />
     ),
   },
   {
-    id: 'group-pricing',
-    titleKey: 'Group Pricing',
+    id: 'group-billing',
+    titleKey: 'Group Billing',
     build: (settings: BillingSettings) => (
-      <RatioSettingsCard
-        titleKey='Group Pricing'
-        modelDefaults={getModelDefaults(settings)}
-        groupDefaults={getGroupDefaults(settings)}
-        toolPricesDefault={settings['tool_price_setting.prices']}
-        visibleTabs={['groups']}
+      <GroupBillingSection
+        defaultValues={{
+          GroupRatio: settings.GroupRatio,
+          GroupGroupRatio: settings.GroupGroupRatio,
+          GroupSpecialUsableGroup: settings.GroupSpecialUsableGroup,
+          UserUsableGroups: settings.UserUsableGroups,
+        }}
       />
     ),
   },
@@ -178,9 +169,9 @@ const BILLING_SECTIONS = [
         waffoPancakeProvisionedStoreID={settings.WaffoPancakeStoreID ?? ''}
         waffoPancakeProvisionedProductID={settings.WaffoPancakeProductID ?? ''}
         complianceDefaults={{
-          confirmed: settings['payment_setting.compliance_confirmed'] ?? false,
+          confirmed: settings['payment_setting.compliance_confirmed'] ?? true,
           termsVersion:
-            settings['payment_setting.compliance_terms_version'] ?? '',
+            settings['payment_setting.compliance_terms_version'] ?? 'v1',
           confirmedAt: settings['payment_setting.compliance_confirmed_at'] ?? 0,
           confirmedBy: settings['payment_setting.compliance_confirmed_by'] ?? 0,
         }}

@@ -245,8 +245,107 @@ export const channelFormSchema = z
     upstream_model_update_check_enabled: z.boolean().optional(),
     upstream_model_update_auto_sync_enabled: z.boolean().optional(),
     upstream_model_update_ignored_models: z.string().optional(),
+    upstream_billing_enabled: z.boolean().optional(),
+    upstream_billing_credential_id: z.number().int().min(0).optional(),
+    upstream_billing_provider: z
+      .enum(['auto', 'new_api', 'sub2api'])
+      .optional(),
+    upstream_billing_access_token: z.string().optional(),
+    upstream_billing_access_token_configured: z.boolean().optional(),
+    upstream_billing_refresh_token: z.string().optional(),
+    upstream_billing_refresh_token_configured: z.boolean().optional(),
+    upstream_billing_access_token_issued_at: z.number().int().optional(),
+    upstream_billing_access_token_expires_at: z.number().int().optional(),
+    upstream_billing_user_id: z.string().optional(),
+    upstream_billing_api_base_url: z.string().optional(),
+    upstream_billing_detected_provider: z
+      .enum(['new_api', 'sub2api'])
+      .optional(),
+    upstream_billing_recheck_enabled: z.boolean().optional(),
+    upstream_billing_recheck_window_hours: z
+      .number()
+      .int()
+      .min(1)
+      .max(720)
+      .optional(),
+    upstream_billing_token_id: z.string().optional(),
+    upstream_billing_token_name: z.string().optional(),
   })
   .superRefine((data, ctx) => {
+    const upstreamBillingProvider = data.upstream_billing_provider || 'auto'
+    const usesSharedCredential = (data.upstream_billing_credential_id || 0) > 0
+    if (
+      data.upstream_billing_enabled === true &&
+      !usesSharedCredential &&
+      upstreamBillingProvider === 'new_api' &&
+      !data.upstream_billing_access_token?.trim() &&
+      data.upstream_billing_access_token_configured !== true
+    ) {
+      addRequiredIssue(
+        ctx,
+        'upstream_billing_access_token',
+        'Upstream billing access token is required'
+      )
+    }
+    if (
+      data.upstream_billing_enabled === true &&
+      !usesSharedCredential &&
+      upstreamBillingProvider === 'sub2api' &&
+      !data.upstream_billing_refresh_token?.trim() &&
+      data.upstream_billing_refresh_token_configured !== true
+    ) {
+      addRequiredIssue(
+        ctx,
+        'upstream_billing_refresh_token',
+        'Sub2API refresh token is required'
+      )
+    }
+    if (
+      data.upstream_billing_enabled === true &&
+      !usesSharedCredential &&
+      upstreamBillingProvider === 'auto' &&
+      !data.upstream_billing_access_token?.trim() &&
+      data.upstream_billing_access_token_configured !== true &&
+      !data.upstream_billing_refresh_token?.trim() &&
+      data.upstream_billing_refresh_token_configured !== true
+    ) {
+      addRequiredIssue(
+        ctx,
+        'upstream_billing_access_token',
+        'Upstream billing access token is required'
+      )
+    }
+    if (!usesSharedCredential && data.upstream_billing_api_base_url?.trim()) {
+      try {
+        const parsed = new URL(data.upstream_billing_api_base_url)
+        if (
+          !['http:', 'https:'].includes(parsed.protocol) ||
+          parsed.username ||
+          parsed.password ||
+          parsed.search ||
+          parsed.hash
+        ) {
+          throw new Error()
+        }
+      } catch {
+        addRequiredIssue(
+          ctx,
+          'upstream_billing_api_base_url',
+          'Upstream billing API base URL must be a valid HTTP URL'
+        )
+      }
+    }
+    if (
+      !usesSharedCredential &&
+      data.upstream_billing_user_id?.trim() &&
+      !/^[1-9]\d*$/.test(data.upstream_billing_user_id.trim())
+    ) {
+      addRequiredIssue(
+        ctx,
+        'upstream_billing_user_id',
+        'Upstream account user ID must be a positive integer'
+      )
+    }
     if ([3, 8, 36, 45].includes(data.type) && !data.base_url?.trim()) {
       addRequiredIssue(
         ctx,
@@ -394,6 +493,22 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   upstream_model_update_check_enabled: false,
   upstream_model_update_auto_sync_enabled: false,
   upstream_model_update_ignored_models: '',
+  upstream_billing_enabled: false,
+  upstream_billing_credential_id: 0,
+  upstream_billing_provider: 'auto',
+  upstream_billing_access_token: '',
+  upstream_billing_access_token_configured: false,
+  upstream_billing_refresh_token: '',
+  upstream_billing_refresh_token_configured: false,
+  upstream_billing_access_token_issued_at: 0,
+  upstream_billing_access_token_expires_at: 0,
+  upstream_billing_user_id: '',
+  upstream_billing_api_base_url: '',
+  upstream_billing_detected_provider: undefined,
+  upstream_billing_recheck_enabled: true,
+  upstream_billing_recheck_window_hours: 24,
+  upstream_billing_token_id: '',
+  upstream_billing_token_name: '',
   advanced_custom: '',
 }
 
@@ -450,6 +565,22 @@ export function transformChannelToFormDefaults(
   let upstreamModelUpdateCheckEnabled = false
   let upstreamModelUpdateAutoSyncEnabled = false
   let upstreamModelUpdateIgnoredModels = ''
+  let upstreamBillingEnabled = false
+  let upstreamBillingCredentialId = 0
+  let upstreamBillingProvider: 'auto' | 'new_api' | 'sub2api' = 'auto'
+  let upstreamBillingAccessToken = ''
+  let upstreamBillingAccessTokenConfigured = false
+  let upstreamBillingRefreshToken = ''
+  let upstreamBillingRefreshTokenConfigured = false
+  let upstreamBillingAccessTokenIssuedAt = 0
+  let upstreamBillingAccessTokenExpiresAt = 0
+  let upstreamBillingUserId = ''
+  let upstreamBillingApiBaseUrl = ''
+  let upstreamBillingDetectedProvider: 'new_api' | 'sub2api' | undefined
+  let upstreamBillingRecheckEnabled = true
+  let upstreamBillingRecheckWindowHours = 24
+  let upstreamBillingTokenId = ''
+  let upstreamBillingTokenName = ''
   let advancedCustom = ''
 
   if (channel.settings) {
@@ -476,6 +607,32 @@ export function transformChannelToFormDefaults(
       )
         ? parsed.upstream_model_update_ignored_models.join(',')
         : ''
+      upstreamBillingEnabled = parsed.upstream_billing?.enabled === true
+      upstreamBillingCredentialId = parsed.upstream_billing?.credential_id || 0
+      upstreamBillingProvider = parsed.upstream_billing?.provider || 'auto'
+      upstreamBillingAccessToken = parsed.upstream_billing?.access_token || ''
+      upstreamBillingAccessTokenConfigured =
+        parsed.upstream_billing?.access_token_configured === true
+      upstreamBillingRefreshToken = parsed.upstream_billing?.refresh_token || ''
+      upstreamBillingRefreshTokenConfigured =
+        parsed.upstream_billing?.refresh_token_configured === true
+      upstreamBillingAccessTokenIssuedAt =
+        parsed.upstream_billing?.access_token_issued_at || 0
+      upstreamBillingAccessTokenExpiresAt =
+        parsed.upstream_billing?.access_token_expires_at || 0
+      upstreamBillingUserId = parsed.upstream_billing?.user_id
+        ? String(parsed.upstream_billing.user_id)
+        : ''
+      upstreamBillingApiBaseUrl = parsed.upstream_billing?.api_base_url || ''
+      upstreamBillingDetectedProvider =
+        parsed.upstream_billing?.detected_provider || undefined
+      upstreamBillingRecheckEnabled =
+        parsed.upstream_billing?.recheck_enabled !== false
+      upstreamBillingRecheckWindowHours =
+        parsed.upstream_billing?.recheck_window_hours || 24
+      upstreamBillingTokenId = parsed.upstream_billing?.upstream_token_id || ''
+      upstreamBillingTokenName =
+        parsed.upstream_billing?.upstream_token_name || ''
       if (parsed.advanced_custom) {
         advancedCustom = stringifyAdvancedCustomConfig(parsed.advanced_custom)
       }
@@ -529,6 +686,25 @@ export function transformChannelToFormDefaults(
     upstream_model_update_check_enabled: upstreamModelUpdateCheckEnabled,
     upstream_model_update_auto_sync_enabled: upstreamModelUpdateAutoSyncEnabled,
     upstream_model_update_ignored_models: upstreamModelUpdateIgnoredModels,
+    upstream_billing_enabled: upstreamBillingEnabled,
+    upstream_billing_credential_id: upstreamBillingCredentialId,
+    upstream_billing_provider: upstreamBillingProvider,
+    upstream_billing_access_token: upstreamBillingAccessToken,
+    upstream_billing_access_token_configured:
+      upstreamBillingAccessTokenConfigured,
+    upstream_billing_refresh_token: upstreamBillingRefreshToken,
+    upstream_billing_refresh_token_configured:
+      upstreamBillingRefreshTokenConfigured,
+    upstream_billing_access_token_issued_at: upstreamBillingAccessTokenIssuedAt,
+    upstream_billing_access_token_expires_at:
+      upstreamBillingAccessTokenExpiresAt,
+    upstream_billing_user_id: upstreamBillingUserId,
+    upstream_billing_api_base_url: upstreamBillingApiBaseUrl,
+    upstream_billing_detected_provider: upstreamBillingDetectedProvider,
+    upstream_billing_recheck_enabled: upstreamBillingRecheckEnabled,
+    upstream_billing_recheck_window_hours: upstreamBillingRecheckWindowHours,
+    upstream_billing_token_id: upstreamBillingTokenId,
+    upstream_billing_token_name: upstreamBillingTokenName,
     advanced_custom: advancedCustom,
   }
 }
@@ -639,6 +815,67 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
 
   settingsObj.disable_task_polling_sleep =
     formData.disable_task_polling_sleep === true
+
+  const upstreamBillingProvider = formData.upstream_billing_provider || 'auto'
+  const upstreamBillingCredentialId =
+    formData.upstream_billing_credential_id || 0
+  let upstreamBillingAccessToken =
+    formData.upstream_billing_access_token?.trim() || ''
+  let upstreamBillingRefreshToken =
+    formData.upstream_billing_refresh_token?.trim() || ''
+  if (
+    upstreamBillingProvider !== 'new_api' &&
+    !upstreamBillingRefreshToken &&
+    upstreamBillingAccessToken.startsWith('rt_')
+  ) {
+    upstreamBillingRefreshToken = upstreamBillingAccessToken
+    upstreamBillingAccessToken = ''
+  }
+  settingsObj.upstream_billing = {
+    enabled:
+      upstreamBillingCredentialId > 0 ||
+      formData.upstream_billing_enabled === true,
+    credential_id: upstreamBillingCredentialId || undefined,
+    provider:
+      upstreamBillingCredentialId > 0 ? undefined : upstreamBillingProvider,
+    access_token:
+      upstreamBillingCredentialId > 0 ? undefined : upstreamBillingAccessToken,
+    access_token_configured:
+      upstreamBillingCredentialId > 0
+        ? undefined
+        : formData.upstream_billing_access_token_configured === true,
+    refresh_token:
+      upstreamBillingCredentialId > 0 ? undefined : upstreamBillingRefreshToken,
+    refresh_token_configured:
+      upstreamBillingCredentialId > 0
+        ? undefined
+        : formData.upstream_billing_refresh_token_configured === true,
+    access_token_issued_at:
+      upstreamBillingCredentialId > 0
+        ? undefined
+        : formData.upstream_billing_access_token_issued_at || undefined,
+    access_token_expires_at:
+      upstreamBillingCredentialId > 0
+        ? undefined
+        : formData.upstream_billing_access_token_expires_at || undefined,
+    user_id:
+      upstreamBillingCredentialId > 0
+        ? undefined
+        : Number(formData.upstream_billing_user_id?.trim()) || undefined,
+    api_base_url:
+      upstreamBillingCredentialId > 0
+        ? undefined
+        : normalizeBaseUrl(formData.upstream_billing_api_base_url),
+    detected_provider:
+      upstreamBillingCredentialId > 0
+        ? undefined
+        : formData.upstream_billing_detected_provider,
+    recheck_enabled: formData.upstream_billing_recheck_enabled !== false,
+    recheck_window_hours: formData.upstream_billing_recheck_window_hours || 24,
+    upstream_token_id: formData.upstream_billing_token_id?.trim() || undefined,
+    upstream_token_name:
+      formData.upstream_billing_token_name?.trim() || undefined,
+  }
 
   // Upstream model update settings (for model-fetchable channel types)
   if (MODEL_FETCHABLE_TYPES.has(formData.type)) {

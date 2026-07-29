@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -81,22 +82,18 @@ func shouldChargeViolationFee(err *types.NewAPIError) bool {
 	return HasCSAMViolationMarker(err)
 }
 
-func calcViolationFeeQuota(amount, groupRatio float64) int {
-	if amount <= 0 {
+func calcViolationFeeQuota(amount, groupRatio float64) int64 {
+	if amount <= 0 || groupRatio < 0 || math.IsNaN(groupRatio) || math.IsInf(groupRatio, 0) {
 		return 0
 	}
-	if groupRatio <= 0 {
-		return 0
-	}
-	quota := decimal.NewFromFloat(amount).
+	quota, clamp := common.QuotaFromDecimalChecked(decimal.NewFromFloat(amount).
 		Mul(decimal.NewFromFloat(common.QuotaPerUnit)).
 		Mul(decimal.NewFromFloat(groupRatio)).
-		Round(0).
-		IntPart()
-	if quota <= 0 {
+		Round(0))
+	if clamp != nil || quota <= 0 {
 		return 0
 	}
-	return int(quota)
+	return quota
 }
 
 // ChargeViolationFeeIfNeeded charges an additional fee after the normal flow finishes (including refund).
@@ -117,7 +114,7 @@ func ChargeViolationFeeIfNeeded(ctx *gin.Context, relayInfo *relaycommon.RelayIn
 		return false
 	}
 
-	groupRatio := relayInfo.PriceData.GroupRatioInfo.GroupRatio
+	groupRatio := relayInfo.PriceData.BillingGroupRatio()
 	feeQuota := calcViolationFeeQuota(settings.ViolationDeductionAmount, groupRatio)
 	if feeQuota <= 0 {
 		return false
@@ -140,12 +137,12 @@ func ChargeViolationFeeIfNeeded(ctx *gin.Context, relayInfo *relaycommon.RelayIn
 		"violation_fee_code":   string(types.ErrorCodeViolationFeeGrokCSAM),
 		"fee_quota":            feeQuota,
 		"base_amount":          settings.ViolationDeductionAmount,
-		"group_ratio":          groupRatio,
 		"status_code":          apiErr.StatusCode,
 		"upstream_error_type":  oai.Type,
 		"upstream_error_code":  fmt.Sprintf("%v", oai.Code),
 		"violation_fee_marker": CSAMViolationMarker,
 	}
+	AttachGroupRatioAudit(other, relayInfo.UserGroup, relayInfo.UsingGroup, relayInfo.PriceData.GroupRatioInfo)
 
 	model.RecordConsumeLog(ctx, relayInfo.UserId, model.RecordConsumeLogParams{
 		ChannelId:      relayInfo.ChannelId,

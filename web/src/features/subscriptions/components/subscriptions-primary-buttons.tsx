@@ -16,25 +16,35 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Plus } from 'lucide-react'
+import { Plus, UserPlus } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
 
 import { useSubscriptions } from './subscriptions-provider'
 
-export function SubscriptionsPrimaryButtons() {
+export function SubscriptionsPrimaryButtons(props: {
+  activeTab: 'users' | 'plans'
+}) {
   const { t } = useTranslation()
   const { setOpen, complianceConfirmed } = useSubscriptions()
   return (
     <div className='flex gap-2'>
       <Button
         size='sm'
-        onClick={() => setOpen('create')}
+        onClick={() =>
+          setOpen(props.activeTab === 'users' ? 'assign' : 'create')
+        }
         disabled={!complianceConfirmed}
       >
-        <Plus className='h-4 w-4' />
-        {t('Create Plan')}
+        {props.activeTab === 'users' ? (
+          <UserPlus className='h-4 w-4' />
+        ) : (
+          <Plus className='h-4 w-4' />
+        )}
+        {props.activeTab === 'users'
+          ? t('Assign Subscription')
+          : t('Create Plan')}
       </Button>
     </div>
   )

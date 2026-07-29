@@ -39,6 +39,13 @@ export type UpdateOptionResponse = {
   message: string
 }
 
+export type UpdateGroupRatioOptionsRequest = {
+  group_ratio: string
+  group_group_ratio: string
+  group_special_usable_group: string
+  user_usable_groups: string
+}
+
 export type ConfirmPaymentComplianceResponse = {
   success: boolean
   message: string
@@ -217,13 +224,6 @@ export type ModelSettings = {
   'billing_setting.billing_mode': string
   'billing_setting.billing_expr': string
   'tool_price_setting.prices': string
-  TopupGroupRatio: string
-  GroupRatio: string
-  UserUsableGroups: string
-  GroupGroupRatio: string
-  AutoGroups: string
-  DefaultUseAutoGroup: boolean
-  'group_ratio_setting.group_special_usable_group': string
   RetryTimes: number
   ChannelDisableThreshold: string
   AutomaticDisableChannelEnabled: boolean
@@ -267,17 +267,14 @@ export type BillingSettings = {
   ImageRatio: string
   AudioRatio: string
   AudioCompletionRatio: string
+  GroupRatio: string
+  GroupGroupRatio: string
+  GroupSpecialUsableGroup: string
+  UserUsableGroups: string
   ExposeRatioEnabled: boolean
   'billing_setting.billing_mode': string
   'billing_setting.billing_expr': string
   'tool_price_setting.prices': string
-  TopupGroupRatio: string
-  GroupRatio: string
-  UserUsableGroups: string
-  GroupGroupRatio: string
-  AutoGroups: string
-  DefaultUseAutoGroup: boolean
-  'group_ratio_setting.group_special_usable_group': string
   PayAddress: string
   EpayId: string
   EpayKey: string

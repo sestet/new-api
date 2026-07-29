@@ -718,7 +718,7 @@ func isModelsDevAPIEndpoint(rawURL string) bool {
 // per-token USD pricing into the local ratio format.
 // model_ratio = prompt_price_per_token * 1_000_000 * (USD / 1000)
 //
-//	since 1 ratio unit = $0.002/1K tokens and USD=500, the factor is 500_000
+//	since internal quota now uses 100,000,000 fixed-point units per USD
 //
 // completion_ratio = completion_price / prompt_price (output/input multiplier)
 func convertOpenRouterToRatioData(reader io.Reader) (map[string]any, error) {

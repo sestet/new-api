@@ -34,7 +34,21 @@ export const DEFAULT_LOG_STATS: LogStatistics = {
   quota: 0,
   rpm: 0,
   tpm: 0,
+  request_count: 0,
+  exact: 0,
+  estimated: 0,
+  pending: 0,
+  failed: 0,
 }
+
+export const UPSTREAM_BILLING_STATUS_FILTERS = [
+  { label: 'All billing statuses', value: 'all' },
+  { label: 'Exact', value: 'exact' },
+  { label: 'Waiting', value: 'waiting' },
+  { label: 'Estimated', value: 'estimated' },
+  { label: 'Pending', value: 'pending' },
+  { label: 'Failed', value: 'failed' },
+] as const
 
 /**
  * Default empty logs data

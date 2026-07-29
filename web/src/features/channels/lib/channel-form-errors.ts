@@ -52,6 +52,20 @@ const ADVANCED_SETTINGS_FIELDS = new Set<FieldPath<ChannelFormValues>>([
   'upstream_model_update_check_enabled',
   'upstream_model_update_auto_sync_enabled',
   'upstream_model_update_ignored_models',
+  'upstream_billing_enabled',
+  'upstream_billing_credential_id',
+  'upstream_billing_provider',
+  'upstream_billing_access_token',
+  'upstream_billing_access_token_configured',
+  'upstream_billing_refresh_token',
+  'upstream_billing_refresh_token_configured',
+  'upstream_billing_access_token_issued_at',
+  'upstream_billing_access_token_expires_at',
+  'upstream_billing_user_id',
+  'upstream_billing_api_base_url',
+  'upstream_billing_detected_provider',
+  'upstream_billing_token_id',
+  'upstream_billing_token_name',
 ])
 
 export function isAdvancedSettingsField(

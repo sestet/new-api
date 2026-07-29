@@ -57,7 +57,7 @@ func TestModelPriceHelperTieredUsesPreloadedRequestInput(t *testing.T) {
 		BillingRatios: map[string]float64{"n": 3},
 	})
 	require.NoError(t, err)
-	require.Equal(t, 1500, priceData.QuotaToPreConsume)
+	require.Equal(t, int64(300_000), priceData.QuotaToPreConsume)
 	require.NotNil(t, info.TieredBillingSnapshot)
 	require.Equal(t, "stream", info.TieredBillingSnapshot.EstimatedTier)
 	require.Equal(t, billing_setting.BillingModeTieredExpr, info.TieredBillingSnapshot.BillingMode)
@@ -77,9 +77,8 @@ func TestModelPriceHelperTieredPreConsumeMaxTokensFallback(t *testing.T) {
 	})
 
 	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
-		"billing_setting.billing_mode":    `{"tiered-fallback-model":"tiered_expr"}`,
-		"billing_setting.billing_expr":    `{"tiered-fallback-model":"tier(\"base\", p * 3 + c * 15)"}`,
-		"group_ratio_setting.group_ratio": `{"default":1,"free":0}`,
+		"billing_setting.billing_mode": `{"tiered-fallback-model":"tiered_expr"}`,
+		"billing_setting.billing_expr": `{"tiered-fallback-model":"tier(\"base\", p * 3 + c * 15)"}`,
 	}))
 
 	const promptTokens = 1000
@@ -88,30 +87,23 @@ func TestModelPriceHelperTieredPreConsumeMaxTokensFallback(t *testing.T) {
 		name      string
 		group     string
 		maxTokens int
-		expected  int
+		expected  int64
 	}{
 		{
 			// max_tokens omitted in a paid group -> fall back to 8192 completion tokens.
-			// p*3 + c*15 = 1000*3 + 8192*15 = 125880 -> /1e6 * 500000 = 62940
+			// p*3 + c*15 = 125880 -> /1e6 * 100000000 = 12588000
 			name:      "non-free group falls back to 8192 completion tokens",
 			group:     "default",
 			maxTokens: 0,
-			expected:  62940,
+			expected:  12_588_000,
 		},
 		{
 			// explicit max_tokens is used verbatim, no fallback.
-			// 1000*3 + 100*15 = 4500 -> /1e6 * 500000 = 2250
+			// 1000*3 + 100*15 = 4500 -> /1e6 * 100000000 = 450000
 			name:      "explicit max_tokens is used verbatim",
 			group:     "default",
 			maxTokens: 100,
-			expected:  2250,
-		},
-		{
-			// free group (ratio 0) stays zero; fallback is gated on non-zero group ratio.
-			name:      "free group stays zero without fallback",
-			group:     "free",
-			maxTokens: 0,
-			expected:  0,
+			expected:  450_000,
 		},
 	}
 
@@ -155,9 +147,8 @@ func TestModelPriceHelperTieredRejectsPreConsumeOverflow(t *testing.T) {
 	})
 
 	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
-		"billing_setting.billing_mode":    `{"tiered-overflow-model":"tiered_expr"}`,
-		"billing_setting.billing_expr":    `{"tiered-overflow-model":"tier(\"overflow\", p * 1000000000000000)"}`,
-		"group_ratio_setting.group_ratio": `{"default":1}`,
+		"billing_setting.billing_mode": `{"tiered-overflow-model":"tiered_expr"}`,
+		"billing_setting.billing_expr": `{"tiered-overflow-model":"tier(\"overflow\", p * 1000000000000000)"}`,
 	}))
 
 	recorder := httptest.NewRecorder()
@@ -204,21 +195,21 @@ func TestModelPriceHelperRequestBillingRatiosOnlyApplyToFixedPrice(t *testing.T)
 	tests := []struct {
 		name           string
 		model          string
-		wantQuota      int
+		wantQuota      int64
 		wantUsePrice   bool
 		wantImageCount bool
 	}{
 		{
 			name:           "fixed price applies image count",
 			model:          "fixed-image-price",
-			wantQuota:      180000,
+			wantQuota:      36_000_000,
 			wantUsePrice:   true,
 			wantImageCount: true,
 		},
 		{
 			name:         "ratio price ignores request billing ratios",
 			model:        "ratio-image-price",
-			wantQuota:    15000,
+			wantQuota:    15_000,
 			wantUsePrice: false,
 		},
 	}
@@ -261,8 +252,8 @@ func TestModelPriceHelperRequestBillingRatiosOnlyApplyToFixedPrice(t *testing.T)
 	ctx, info := newInfo("fractional-image-price")
 	priceData, err := ModelPriceHelper(ctx, info, 0, meta)
 	require.NoError(t, err)
-	// 0.0000012 * 500000 * 3 = 1.8, then truncate once to 1.
-	require.Equal(t, 1, priceData.QuotaToPreConsume)
+	// 0.0000012 * 100000000 * 3 = 360.
+	require.Equal(t, int64(360), priceData.QuotaToPreConsume)
 
 	ctx, info = newInfo("overflow-image-price")
 	_, err = ModelPriceHelper(ctx, info, 0, meta)

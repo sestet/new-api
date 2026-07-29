@@ -96,6 +96,10 @@ func (*CreemAdaptor) RequestPay(c *gin.Context, req *CreemPayRequest) {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "产品不存在"})
 		return
 	}
+	if selectedProduct.Quota < 0 || selectedProduct.Quota > common.MaxQuota {
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "产品额度超出有效范围"})
+		return
+	}
 
 	id := c.GetInt("id")
 	user, _ := model.GetUserById(id, false)

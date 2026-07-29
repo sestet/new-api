@@ -1,3 +1,4 @@
+import { AssignSubscriptionDialog } from './dialogs/assign-subscription-dialog'
 /*
 Copyright (C) 2023-2026 QuantumNous
 
@@ -27,6 +28,7 @@ export function SubscriptionsDialogs() {
 
   return (
     <>
+      <AssignSubscriptionDialog />
       <SubscriptionsMutateDrawer
         open={open === 'create' || isUpdate}
         onOpenChange={(isOpen) => !isOpen && setOpen(null)}

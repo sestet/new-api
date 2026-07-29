@@ -94,7 +94,7 @@ func BuildTieredTokenParams(usage *dto.Usage, isClaudeUsageSemantic bool, usedVa
 // computes the actual quota using the frozen BillingSnapshot. Returns:
 //   - ok=true, quota, result  when tiered billing applies
 //   - ok=false, 0, nil        when it doesn't (caller should fall through to existing logic)
-func TryTieredSettle(relayInfo *relaycommon.RelayInfo, params billingexpr.TokenParams) (ok bool, quota int, result *billingexpr.TieredResult) {
+func TryTieredSettle(relayInfo *relaycommon.RelayInfo, params billingexpr.TokenParams) (ok bool, quota int64, result *billingexpr.TieredResult) {
 	snap := relayInfo.TieredBillingSnapshot
 	if snap == nil || snap.BillingMode != "tiered_expr" {
 		return false, 0, nil
@@ -109,15 +109,15 @@ func TryTieredSettle(relayInfo *relaycommon.RelayInfo, params billingexpr.TokenP
 	if err != nil {
 		quota = relayInfo.FinalPreConsumedQuota
 		if quota <= 0 {
-			quota = snap.EstimatedQuotaAfterGroup
+			quota = snap.EstimatedQuota
 		}
 		return true, quota, nil
 	}
 
-	// Surface any int32 saturation from settlement onto RelayInfo so the
+	// Surface any quota saturation from settlement onto RelayInfo so the
 	// consume log records it under admin_info, regardless of which caller
 	// (text, audio, WSS) consumes the returned quota. First non-nil wins.
 	noteQuotaClamp(relayInfo, tr.Clamp)
 
-	return true, tr.ActualQuotaAfterGroup, &tr
+	return true, tr.ActualQuota, &tr
 }

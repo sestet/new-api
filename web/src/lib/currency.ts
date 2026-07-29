@@ -48,7 +48,7 @@ For commercial licensing, please contact support@quantumnous.com
  * - quotaDisplayType: 'CNY'
  * - usdExchangeRate: 7 (1 USD = 7 CNY)
  * - priceRatio: 5 (5 CNY per 1 USD credit)
- * - quotaPerUnit: 500000 (tokens per USD)
+ * - quotaPerUnit: 100000000 (quota units per USD)
  *
  * User Flow:
  * 1. Recharge option: 10 USD
@@ -132,7 +132,7 @@ type DisplayMeta =
 
 const DEFAULT_FORMAT_OPTIONS: ResolvedCurrencyFormatOptions = {
   digitsLarge: 2,
-  digitsSmall: 4,
+  digitsSmall: 8,
   abbreviate: true,
   minimumNonZero: 0,
   compact: false,
@@ -367,8 +367,8 @@ export function getCurrencyDisplay() {
  * formatCurrencyFromUSD(10) → "¥70"
  *
  * @example
- * // With quotaDisplayType: 'TOKENS', quotaPerUnit: 500000
- * formatCurrencyFromUSD(10) → "5,000,000"
+ * // With quotaDisplayType: 'TOKENS', quotaPerUnit: 100000000
+ * formatCurrencyFromUSD(10) → "1,000,000,000"
  *
  * @example
  * // With quotaDisplayType: 'CUSTOM', customCurrencySymbol: '€', customCurrencyExchangeRate: 0.9
@@ -466,23 +466,23 @@ export function formatBillingCurrencyFromUSD(
 }
 
 /**
- * Format raw quota values (token units) to display currency.
+ * Format raw fixed-point quota values to display currency.
  *
  * Converts raw quota/token amounts to USD first, then formats according
- * to display settings. Use when you have quota in token units (e.g., 5000000)
+ * to display settings. Use when you have quota in fixed-point units (e.g., 100000000)
  * and need to display it as currency (e.g., "$10").
  *
- * @param quota - Raw quota amount in token units (e.g., 5000000)
+ * @param quota - Raw quota amount in fixed-point units (e.g., 100000000)
  * @param options - Optional formatting configuration
  * @returns Formatted string with currency symbol or token count
  *
  * @example
- * // With quotaPerUnit: 500000, quotaDisplayType: 'USD'
- * formatQuotaWithCurrency(5000000) → "$10"
+ * // With quotaPerUnit: 100000000, quotaDisplayType: 'USD'
+ * formatQuotaWithCurrency(1000000000) → "$10"
  *
  * @example
- * // With quotaPerUnit: 500000, quotaDisplayType: 'CNY', usdExchangeRate: 7
- * formatQuotaWithCurrency(5000000) → "¥70"
+ * // With quotaPerUnit: 100000000, quotaDisplayType: 'CNY', usdExchangeRate: 7
+ * formatQuotaWithCurrency(1000000000) → "¥70"
  *
  * @remarks
  * Use this function for:

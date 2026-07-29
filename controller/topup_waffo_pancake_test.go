@@ -34,13 +34,11 @@ func TestGetWaffoPancakePayMoney(t *testing.T) {
 	for k, v := range operation_setting.GetPaymentSetting().AmountDiscount {
 		originalDiscounts[k] = v
 	}
-	originalTopupGroupRatio := common.TopupGroupRatio2JSONString()
 
 	t.Cleanup(func() {
 		setting.WaffoPancakeUnitPrice = originalUnitPrice
 		operation_setting.GetGeneralSetting().QuotaDisplayType = originalQuotaDisplayType
 		operation_setting.GetPaymentSetting().AmountDiscount = originalDiscounts
-		require.NoError(t, common.UpdateTopupGroupRatioByJSONString(originalTopupGroupRatio))
 	})
 
 	setting.WaffoPancakeUnitPrice = 2.5
@@ -49,7 +47,6 @@ func TestGetWaffoPancakePayMoney(t *testing.T) {
 		int(common.QuotaPerUnit * 3): 0.5,
 		20:                           0,
 	}
-	require.NoError(t, common.UpdateTopupGroupRatioByJSONString(`{"default":1,"vip":1.2}`))
 
 	testCases := []struct {
 		name             string
@@ -59,18 +56,18 @@ func TestGetWaffoPancakePayMoney(t *testing.T) {
 		expected         float64
 	}{
 		{
-			name:             "currency display applies unit price group ratio and discount",
+			name:             "currency display applies unit price and discount",
 			amount:           10,
 			group:            "vip",
 			quotaDisplayType: operation_setting.QuotaDisplayTypeUSD,
-			expected:         24,
+			expected:         20,
 		},
 		{
 			name:             "tokens display converts quota to display units before pricing",
 			amount:           int64(common.QuotaPerUnit * 3),
 			group:            "vip",
 			quotaDisplayType: operation_setting.QuotaDisplayTypeTokens,
-			expected:         4.5,
+			expected:         3.75,
 		},
 		{
 			name:             "non-positive discount falls back to no discount",
@@ -84,7 +81,7 @@ func TestGetWaffoPancakePayMoney(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			operation_setting.GetGeneralSetting().QuotaDisplayType = tc.quotaDisplayType
-			actual := getWaffoPancakePayMoney(tc.amount, tc.group)
+			actual := getWaffoPancakePayMoney(tc.amount)
 			require.InDelta(t, tc.expected, actual, 0.000001)
 		})
 	}

@@ -71,6 +71,20 @@ export const channelSchema = z.object({
     multi_key_mode: 'random',
   }),
   settings: z.string().default('{}'), // other_settings JSON
+  upstream_billing_stats: z
+    .object({
+      channel_id: z.number(),
+      total: z.number(),
+      exact: z.number(),
+      estimated: z.number(),
+      pending: z.number(),
+      failed: z.number(),
+      exact_quota: z.number(),
+      estimated_quota: z.number(),
+      pending_quota: z.number(),
+      coverage: z.number(),
+    })
+    .optional(),
 })
 
 export type Channel = z.infer<typeof channelSchema>
@@ -106,7 +120,57 @@ export interface ChannelOtherSettings {
   upstream_model_update_ignored_models?: string[]
   upstream_model_update_last_check_time?: number
   upstream_model_update_last_detected_models?: string[]
+  upstream_billing?: UpstreamBillingSettings
   advanced_custom?: AdvancedCustomConfig
+}
+
+export interface UpstreamBillingSettings {
+  credential_id?: number
+  enabled?: boolean
+  provider?: 'auto' | 'new_api' | 'sub2api'
+  access_token?: string
+  access_token_configured?: boolean
+  refresh_token?: string
+  refresh_token_configured?: boolean
+  access_token_issued_at?: number
+  access_token_expires_at?: number
+  user_id?: number
+  api_base_url?: string
+  detected_provider?: 'new_api' | 'sub2api'
+  recheck_enabled?: boolean
+  recheck_window_hours?: number
+  upstream_token_id?: string
+  upstream_token_name?: string
+}
+
+export interface UpstreamBillingAccount {
+  id: number
+  name: string
+  provider: 'new_api' | 'sub2api'
+  api_base_url: string
+  access_token_configured: boolean
+  refresh_token_configured: boolean
+  access_token_issued_at: number
+  access_token_expires_at: number
+  user_id: number
+  detected_provider?: 'new_api' | 'sub2api'
+  enabled: boolean
+  health_status: 'unknown' | 'healthy' | 'error'
+  health_error: string
+  health_checked_at: number
+  channel_count: number
+  created_at: number
+  updated_at: number
+}
+
+export interface UpstreamBillingAccountInput {
+  name: string
+  provider: 'new_api' | 'sub2api'
+  api_base_url: string
+  access_token?: string
+  refresh_token?: string
+  user_id?: number
+  enabled: boolean
 }
 
 export interface AdvancedCustomConfig {
@@ -176,7 +240,32 @@ export interface ChannelOpsResponse {
   message?: string
   data?: {
     retry_times: number
+    upstream_billing_stats?: UpstreamBillingStats
   }
+}
+
+export interface UpstreamBillingStats {
+  total: number
+  exact: number
+  estimated: number
+  pending: number
+  failed: number
+  exact_quota: number
+  estimated_quota: number
+  pending_quota: number
+  coverage: number
+  channels: Array<{
+    channel_id: number
+    total: number
+    exact: number
+    estimated: number
+    pending: number
+    failed: number
+    exact_quota: number
+    estimated_quota: number
+    pending_quota: number
+    coverage: number
+  }>
 }
 
 export interface ChannelTestResponse {

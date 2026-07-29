@@ -66,6 +66,7 @@ import {
   resetUserSubscriptionsByPlan,
 } from '../../api'
 import { formatTimestamp } from '../../lib'
+import { getSubscriptionUsageBreakdown } from '../../lib/subscription-usage'
 import type { PlanRecord, UserSubscriptionRecord } from '../../types'
 
 interface Props {
@@ -343,11 +344,30 @@ export function UserSubscriptionsDialog(props: Props) {
                   header: t('Total Quota'),
                   cell: (record) => {
                     const sub = record.subscription
-                    const total = Number(sub.amount_total || 0)
-                    const used = Number(sub.amount_used || 0)
-                    return total > 0
-                      ? `${formatQuota(used)}/${formatQuota(total)}`
-                      : t('Unlimited')
+                    const usage = getSubscriptionUsageBreakdown(sub)
+                    return (
+                      <div className='space-y-0.5 text-sm'>
+                        <div>
+                          {t('Request usage')}:{' '}
+                          {formatQuota(usage.requestUsage)}
+                        </div>
+                        <div>
+                          {t('Debt offset')}: {formatQuota(usage.debtOffset)}
+                        </div>
+                        <div>
+                          {t('Available quota')}:{' '}
+                          {usage.total > 0
+                            ? formatQuota(usage.available)
+                            : t('Unlimited')}
+                        </div>
+                        <div>
+                          {t('Period quota')}:{' '}
+                          {usage.total > 0
+                            ? formatQuota(usage.total)
+                            : t('Unlimited')}
+                        </div>
+                      </div>
+                    )
                   },
                 },
                 {

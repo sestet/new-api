@@ -56,7 +56,8 @@ type Channel struct {
 	OtherSettings string `json:"settings" gorm:"column:settings"` // 其他设置，存储azure版本等不需要检索的信息，详见dto.ChannelOtherSettings
 
 	// cache info
-	Keys []string `json:"-" gorm:"-"`
+	Keys                 []string                     `json:"-" gorm:"-"`
+	UpstreamBillingStats *UpstreamBillingChannelStats `json:"upstream_billing_stats,omitempty" gorm:"-"`
 }
 
 type ChannelInfo struct {
@@ -858,7 +859,7 @@ func EditChannelByTag(tag string, newTag *string, modelMapping *string, models *
 	return nil
 }
 
-func UpdateChannelUsedQuota(id int, quota int) {
+func UpdateChannelUsedQuota(id int, quota int64) {
 	if common.BatchUpdateEnabled {
 		addNewRecord(BatchUpdateTypeChannelUsedQuota, id, quota)
 		return
@@ -866,7 +867,7 @@ func UpdateChannelUsedQuota(id int, quota int) {
 	updateChannelUsedQuota(id, quota)
 }
 
-func updateChannelUsedQuota(id int, quota int) {
+func updateChannelUsedQuota(id int, quota int64) {
 	err := DB.Model(&Channel{}).Where("id = ?", id).Update("used_quota", gorm.Expr("used_quota + ?", quota)).Error
 	if err != nil {
 		common.SysLog(fmt.Sprintf("failed to update channel used quota: channel_id=%d, delta_quota=%d, error=%v", id, quota, err))
@@ -969,6 +970,14 @@ func (channel *Channel) ValidateSettings() error {
 	if channelOtherSettings.AdvancedCustom != nil {
 		if err := channelOtherSettings.AdvancedCustom.Validate(); err != nil {
 			return err
+		}
+	}
+	if err := channelOtherSettings.UpstreamBilling.Validate(); err != nil {
+		return err
+	}
+	if channelOtherSettings.UpstreamBilling != nil && channelOtherSettings.UpstreamBilling.CredentialID > 0 {
+		if _, err := GetUpstreamBillingAccountByID(channelOtherSettings.UpstreamBilling.CredentialID); err != nil {
+			return fmt.Errorf("invalid upstream billing account: %w", err)
 		}
 	}
 	if channel.Type == constant.ChannelTypeAdvancedCustom && channelOtherSettings.UpstreamModelUpdateCheckEnabled {

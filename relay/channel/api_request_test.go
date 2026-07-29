@@ -1,14 +1,58 @@
 package channel
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
+	appcommon "github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestDoRequestUsesInternalRequestIDForUpstreamBilling(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service.InitHttpClient()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "internal-request-id", r.Header.Get("X-Request-ID"))
+		w.Header().Set("X-Request-ID", "upstream-request-id")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(""))
+	ctx.Set(appcommon.UpstreamRequestIdKey, "internal-request-id")
+	ctx.Set(appcommon.UpstreamBillingRequestIdKey, "internal-request-id")
+	request, err := http.NewRequest(http.MethodPost, server.URL, io.NopCloser(strings.NewReader("")))
+	require.NoError(t, err)
+	request.Header.Set("X-Request-ID", "client-controlled-id")
+	info := &relaycommon.RelayInfo{
+		RequestId:   "internal-request-id",
+		RelayFormat: types.RelayFormatOpenAI,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				UpstreamBilling: &dto.UpstreamBillingSettings{Enabled: true},
+			},
+		},
+	}
+
+	response, err := doRequest(ctx, request, info)
+
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = response.Body.Close() })
+	require.Equal(t, "upstream-request-id", ctx.GetString(appcommon.UpstreamRequestIdKey))
+	require.Equal(t, "internal-request-id", ctx.GetString(appcommon.UpstreamBillingRequestIdKey))
+	_, _ = io.Copy(io.Discard, response.Body)
+}
 
 func TestProcessHeaderOverride_ChannelTestSkipsPassthroughRules(t *testing.T) {
 	t.Parallel()

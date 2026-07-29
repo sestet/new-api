@@ -66,6 +66,7 @@ export const userSubscriptionSchema = z.object({
   end_time: z.number(),
   amount_total: z.number(),
   amount_used: z.number(),
+  debt_offset: z.number().optional().default(0),
   next_reset_time: z.number().optional(),
 })
 
@@ -73,6 +74,47 @@ export type UserSubscription = z.infer<typeof userSubscriptionSchema>
 
 export interface UserSubscriptionRecord {
   subscription: UserSubscription
+}
+
+export interface AdminUserSubscription {
+  id: number
+  user_id: number
+  username: string
+  display_name: string
+  email: string
+  plan_id: number
+  plan_title: string
+  quota_reset_period: SubscriptionPlan['quota_reset_period']
+  quota_reset_custom_seconds: number
+  status: 'active' | 'expired' | 'cancelled'
+  source: string
+  amount_total: number
+  amount_used: number
+  debt_offset: number
+  start_time: number
+  end_time: number
+  last_reset_time: number
+  next_reset_time: number
+  created_at: number
+}
+
+export interface AdminUserSubscriptionsResponse {
+  success: boolean
+  message?: string
+  data?: {
+    items: AdminUserSubscription[]
+    total: number
+    page: number
+    page_size: number
+  }
+}
+
+export interface AdminUserSubscriptionsParams {
+  p?: number
+  page_size?: number
+  keyword?: string
+  plan_id?: number
+  status?: string
 }
 
 // ============================================================================
@@ -153,3 +195,4 @@ export type SubscriptionsDialogType =
   | 'update'
   | 'toggle-status'
   | 'reset-subscriptions'
+  | 'assign'

@@ -509,6 +509,46 @@ function BalanceCell({ channel }: { channel: Channel }) {
   )
 }
 
+function UpstreamBillingCell({ channel }: { channel: Channel }) {
+  const { t } = useTranslation()
+  const stats = channel.upstream_billing_stats
+  if (!stats || stats.total === 0) {
+    return <span className='text-muted-foreground'>-</span>
+  }
+
+  const coverage = `${(stats.coverage * 100).toFixed(1)}%`
+  return (
+    <TooltipProvider delay={100}>
+      <Tooltip>
+        <TooltipTrigger render={<span />}>
+          <StatusBadge
+            label={`${stats.exact}/${stats.total} (${coverage})`}
+            variant={stats.coverage === 1 ? 'success' : 'warning'}
+            size='sm'
+            copyable={false}
+          />
+        </TooltipTrigger>
+        <TooltipContent side='top' className='space-y-1 text-xs'>
+          <div>
+            {t('Exact amount')}: {formatQuotaWithCurrency(stats.exact_quota)}
+          </div>
+          <div>
+            {t('Estimated amount')}:{' '}
+            {formatQuotaWithCurrency(stats.estimated_quota)}
+          </div>
+          <div>
+            {t('Pending amount')}:{' '}
+            {formatQuotaWithCurrency(stats.pending_quota)}
+          </div>
+          <div>
+            {t('Failed requests')}: {stats.failed}
+          </div>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  )
+}
+
 /**
  * Generate channels columns configuration
  */
@@ -1063,6 +1103,15 @@ export function useChannelsColumns(
         header: t('Used / Remaining'),
         cell: ({ row }) => <BalanceCell channel={row.original} />,
         size: 180,
+      },
+
+      {
+        id: 'upstream_billing',
+        header: t('Exact billing'),
+        meta: { mobileHidden: true },
+        cell: ({ row }) => <UpstreamBillingCell channel={row.original} />,
+        size: 150,
+        enableSorting: false,
       },
 
       // Response Time column

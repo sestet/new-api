@@ -62,7 +62,7 @@ export function formatCurrencyUSD(value: number | null | undefined): string {
 }
 
 // ============================================================================
-// Quota Formatting (500,000 units = $1)
+// Quota Formatting (100,000,000 units = $1)
 // ============================================================================
 
 /**
@@ -71,8 +71,8 @@ export function formatCurrencyUSD(value: number | null | undefined): string {
  */
 export function formatQuota(quota: number): string {
   return formatQuotaWithCurrency(quota, {
-    digitsLarge: 2,
-    digitsSmall: 4,
+    digitsLarge: 8,
+    digitsSmall: 8,
     abbreviate: true,
   })
 }
@@ -203,12 +203,12 @@ export function formatTimeStr(date: Date): string {
 
 /**
  * Format quota for usage logs with higher precision
- * Uses 6 decimal places to show very small costs accurately
+ * Uses 8 decimal places to preserve the fixed-point quota precision.
  */
 export function formatLogQuota(quota: number): string {
   return formatQuotaWithCurrency(quota, {
-    digitsLarge: 4,
-    digitsSmall: 6,
+    digitsLarge: 8,
+    digitsSmall: 8,
     abbreviate: false,
   })
 }

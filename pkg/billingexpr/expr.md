@@ -217,10 +217,25 @@ This ensures that heavy cache usage doesn't cause the tier condition to incorrec
 Expression coefficients are $/1M tokens. Conversion to internal quota:
 
 ```
-quota = exprOutput / 1,000,000 * QuotaPerUnit * groupRatio
+quota = exprOutput / 1,000,000 * QuotaPerUnit
 ```
 
-This matches the per-call billing pattern: `quota = modelPrice * QuotaPerUnit * groupRatio`.
+This matches the per-call billing pattern: `quota = modelPrice * QuotaPerUnit`.
+
+The expression result is the request's base USD cost. Settlement then applies
+the final group billing ratio snapshotted when the request starts:
+
+```text
+finalGroupRatio = GroupGroupRatio[userGroup][usingGroup]
+                  if that override exists
+                  otherwise GroupRatio[usingGroup]
+quota = expressionCostUSD * finalGroupRatio * QuotaPerUnit
+```
+
+`GroupGroupRatio` replaces `GroupRatio`; the two values are never multiplied.
+The ratio and its source are stored in `BillingSnapshot`, so later setting
+changes cannot alter an in-flight or historical tiered settlement. Recharge
+amounts are not affected by these request billing ratios.
 
 ### Expression Versioning
 

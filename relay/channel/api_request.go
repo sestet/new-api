@@ -506,6 +506,19 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 		}
 	}
 
+	if info != nil && info.ChannelMeta != nil && info.RequestId != "" && info.SupportsUpstreamBillingReconciliation() && info.ChannelOtherSettings.UpstreamBilling != nil && info.ChannelOtherSettings.UpstreamBilling.Enabled {
+		upstreamRequestID := common2.GetContextKeyString(c, common2.UpstreamBillingRequestIdKey)
+		if upstreamRequestID == "" {
+			upstreamRequestID = common2.GetContextKeyString(c, common2.UpstreamRequestIdKey)
+		}
+		if upstreamRequestID == "" {
+			upstreamRequestID = info.RequestId
+		}
+		c.Set(common2.UpstreamBillingRequestIdKey, upstreamRequestID)
+		c.Set(common2.UpstreamRequestIdKey, upstreamRequestID)
+		req.Header.Set("X-Request-ID", upstreamRequestID)
+	}
+
 	resp, err := client.Do(req)
 	if err != nil {
 		logger.LogError(c, "do request failed: "+err.Error())
@@ -516,6 +529,8 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 	}
 
 	if upID := resp.Header.Get(common2.RequestIdKey); upID != "" {
+		c.Set(common2.UpstreamRequestIdKey, upID)
+	} else if upID := resp.Header.Get("X-Request-ID"); upID != "" {
 		c.Set(common2.UpstreamRequestIdKey, upID)
 	}
 

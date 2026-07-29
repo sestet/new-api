@@ -60,6 +60,28 @@ type ResponsesUsageInfo struct {
 	BuiltInTools map[string]*BuildInToolInfo
 }
 
+type UpstreamBillingAudit struct {
+	Enabled           bool
+	CredentialId      int
+	Provider          string
+	Status            string
+	UpstreamRequestId string
+	IdentityAmbiguous bool
+	UpstreamCostUSD   string
+	UpstreamQuota     int64
+	UpstreamCostQuota int64
+	MarginQuota       int64
+	EstimatedQuota    int64
+	ChargedQuota      int64
+	UserGroup         string
+	UsingGroup        string
+	GroupRatio        string
+	GroupRatioSource  string
+	QuotaPerUnit      string
+	Attempts          int
+	Error             string
+}
+
 type ChannelMeta struct {
 	ChannelType          int
 	ChannelId            int
@@ -117,11 +139,11 @@ type RelayInfo struct {
 	ReasoningEffort        string
 	UserSetting            dto.UserSetting
 	UserEmail              string
-	UserQuota              int
+	UserQuota              int64
 	RelayFormat            types.RelayFormat
 	SendResponseCount      int
 	ReceivedResponseCount  int
-	FinalPreConsumedQuota  int // 最终预消耗的配额
+	FinalPreConsumedQuota  int64 // 最终预消耗的配额
 	// ForcePreConsume 为 true 时禁用 BillingSession 的信任额度旁路，
 	// 强制预扣全额。用于异步任务（视频/音乐生成等），因为请求返回后任务仍在运行，
 	// 必须在提交前锁定全额。
@@ -129,8 +151,7 @@ type RelayInfo struct {
 	// Billing 是计费会话，封装了预扣费/结算/退款的统一生命周期。
 	// 免费模型时为 nil。
 	Billing BillingSettler
-	// BillingSource indicates whether this request is billed from wallet quota or subscription.
-	// "" or "wallet" => wallet; "subscription" => subscription
+	// BillingSource identifies wallet, subscription, or log-only channel-test billing.
 	BillingSource string
 	// SubscriptionId is the user_subscriptions.id used when BillingSource == "subscription"
 	SubscriptionId int
@@ -138,6 +159,8 @@ type RelayInfo struct {
 	SubscriptionPreConsumed int64
 	// SubscriptionPostDelta is the post-consume delta applied to amount_used (quota units; can be negative).
 	SubscriptionPostDelta int64
+	// WalletQuotaDeducted is the part of a subscription-funded request that overflowed to the wallet.
+	WalletQuotaDeducted int64
 	// SubscriptionPlanId / SubscriptionPlanTitle are used for logging/UI display.
 	SubscriptionPlanId    int
 	SubscriptionPlanTitle string
@@ -166,7 +189,8 @@ type RelayInfo struct {
 	// QuotaClamp is set (non-nil) when a quota conversion saturated at the
 	// int32 bound (or NaN fallback) while computing this request's charge.
 	// It is surfaced onto the consume/task log's admin_info for auditing.
-	QuotaClamp *common.QuotaClamp
+	QuotaClamp           *common.QuotaClamp
+	UpstreamBillingAudit *UpstreamBillingAudit
 
 	// TieredBillingSnapshot is a frozen snapshot of tiered billing rules
 	// captured at pre-consume time. Non-nil only when billing mode is "tiered_expr".
@@ -191,6 +215,26 @@ type RelayInfo struct {
 	*ResponsesUsageInfo
 	*ChannelMeta
 	*TaskRelayInfo
+}
+
+func (info *RelayInfo) SupportsUpstreamBillingReconciliation() bool {
+	if info == nil {
+		return false
+	}
+	switch info.RelayFormat {
+	case types.RelayFormatOpenAI,
+		types.RelayFormatClaude,
+		types.RelayFormatGemini,
+		types.RelayFormatOpenAIResponses,
+		types.RelayFormatOpenAIResponsesCompaction,
+		types.RelayFormatOpenAIAudio,
+		types.RelayFormatOpenAIImage,
+		types.RelayFormatRerank,
+		types.RelayFormatEmbedding:
+		return true
+	default:
+		return false
+	}
 }
 
 func (info *RelayInfo) InitChannelMeta(c *gin.Context) {
@@ -473,7 +517,7 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 		UserId:     common.GetContextKeyInt(c, constant.ContextKeyUserId),
 		UsingGroup: common.GetContextKeyString(c, constant.ContextKeyUsingGroup),
 		UserGroup:  common.GetContextKeyString(c, constant.ContextKeyUserGroup),
-		UserQuota:  common.GetContextKeyInt(c, constant.ContextKeyUserQuota),
+		UserQuota:  common.GetContextKeyInt64(c, constant.ContextKeyUserQuota),
 		UserEmail:  common.GetContextKeyString(c, constant.ContextKeyUserEmail),
 
 		OriginModelName: common.GetContextKeyString(c, constant.ContextKeyOriginalModel),

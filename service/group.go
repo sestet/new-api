@@ -9,32 +9,24 @@ import (
 )
 
 func GetUserUsableGroups(userGroup string) map[string]string {
-	groupsCopy := setting.GetUserUsableGroupsCopy()
-	if userGroup != "" {
-		specialSettings, b := ratio_setting.GetGroupRatioSetting().GroupSpecialUsableGroup.Get(userGroup)
-		if b {
-			// 处理特殊可用分组
-			for specialGroup, desc := range specialSettings {
-				if strings.HasPrefix(specialGroup, "-:") {
-					// 移除分组
-					groupToRemove := strings.TrimPrefix(specialGroup, "-:")
-					delete(groupsCopy, groupToRemove)
-				} else if strings.HasPrefix(specialGroup, "+:") {
-					// 添加分组
-					groupToAdd := strings.TrimPrefix(specialGroup, "+:")
-					groupsCopy[groupToAdd] = desc
-				} else {
-					// 直接添加分组
-					groupsCopy[specialGroup] = desc
-				}
-			}
-		}
-		// 如果userGroup不在UserUsableGroups中，返回UserUsableGroups + userGroup
-		if _, ok := groupsCopy[userGroup]; !ok {
-			groupsCopy[userGroup] = "用户分组"
+	groups := setting.GetUserUsableGroupsCopy()
+	if userGroup == "" {
+		return groups
+	}
+	for specialGroup, description := range ratio_setting.GetGroupSpecialUsableGroups(userGroup) {
+		switch {
+		case strings.HasPrefix(specialGroup, "-:"):
+			delete(groups, strings.TrimPrefix(specialGroup, "-:"))
+		case strings.HasPrefix(specialGroup, "+:"):
+			groups[strings.TrimPrefix(specialGroup, "+:")] = description
+		default:
+			groups[specialGroup] = description
 		}
 	}
-	return groupsCopy
+	if _, ok := groups[userGroup]; !ok {
+		groups[userGroup] = "用户分组"
+	}
+	return groups
 }
 
 func GroupInUserUsableGroups(userGroup, groupName string) bool {
@@ -67,15 +59,4 @@ func GetGroupsEnabledModels(groups []string) []string {
 		}
 	}
 	return models
-}
-
-// GetUserGroupRatio 获取用户使用某个分组的倍率
-// userGroup 用户分组
-// group 需要获取倍率的分组
-func GetUserGroupRatio(userGroup, group string) float64 {
-	ratio, ok := ratio_setting.GetGroupGroupRatio(userGroup, group)
-	if ok {
-		return ratio
-	}
-	return ratio_setting.GetGroupRatio(group)
 }

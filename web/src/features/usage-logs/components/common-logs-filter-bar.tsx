@@ -38,10 +38,14 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 
-import { LOG_TYPE_ALL_VALUE, LOG_TYPE_FILTERS } from '../constants'
+import {
+  LOG_TYPE_ALL_VALUE,
+  LOG_TYPE_FILTERS,
+  UPSTREAM_BILLING_STATUS_FILTERS,
+} from '../constants'
 import { buildSearchParams } from '../lib/filter'
 import { getDefaultTimeRange } from '../lib/utils'
-import type { CommonLogFilters } from '../types'
+import type { CommonLogFilters, UpstreamBillingStatusFilter } from '../types'
 import { CommonLogsStats } from './common-logs-stats'
 import { CompactDateTimeRangePicker } from './compact-date-time-range-picker'
 import {
@@ -54,8 +58,13 @@ import { useLogsViewScope, useUsageLogsContext } from './usage-logs-provider'
 const route = getRouteApi('/_authenticated/usage-logs/$section')
 
 type LogTypeValue = (typeof LOG_TYPE_FILTERS)[number]['value']
+type BillingStatusValue =
+  (typeof UPSTREAM_BILLING_STATUS_FILTERS)[number]['value']
 const logTypeValueSet = new Set<string>(
   LOG_TYPE_FILTERS.map((type) => type.value)
+)
+const billingStatusValueSet = new Set<string>(
+  UPSTREAM_BILLING_STATUS_FILTERS.map((status) => status.value)
 )
 
 type CommonLogDraft = {
@@ -77,6 +86,12 @@ function getLogTypeValue(value: unknown): LogTypeValue {
     : LOG_TYPE_ALL_VALUE
 }
 
+function getBillingStatusValue(value: unknown): BillingStatusValue {
+  return typeof value === 'string' && billingStatusValueSet.has(value)
+    ? (value as BillingStatusValue)
+    : 'all'
+}
+
 function buildSearchSourceKey(values: {
   startTime?: unknown
   endTime?: unknown
@@ -87,6 +102,7 @@ function buildSearchSourceKey(values: {
   username?: unknown
   requestId?: unknown
   upstreamRequestId?: unknown
+  billingStatus?: unknown
   type?: unknown
 }) {
   return [
@@ -99,6 +115,7 @@ function buildSearchSourceKey(values: {
     values.username,
     values.requestId,
     values.upstreamRequestId,
+    values.billingStatus,
     Array.isArray(values.type) ? values.type.join(',') : values.type,
   ]
     .map((value) => String(value ?? ''))
@@ -132,6 +149,7 @@ export function CommonLogsFilterBar<TData>(
       username: searchParams.username,
       requestId: searchParams.requestId,
       upstreamRequestId: searchParams.upstreamRequestId,
+      billingStatus: searchParams.billingStatus,
       type: searchParams.type,
     }
     const filters: CommonLogFilters = {
@@ -146,6 +164,7 @@ export function CommonLogsFilterBar<TData>(
       username: searchParams.username || undefined,
       requestId: searchParams.requestId || undefined,
       upstreamRequestId: searchParams.upstreamRequestId || undefined,
+      billingStatus: getBillingStatusValue(searchParams.billingStatus),
     }
     return {
       sourceKey: buildSearchSourceKey(sourceValues),
@@ -162,6 +181,7 @@ export function CommonLogsFilterBar<TData>(
     searchParams.username,
     searchParams.requestId,
     searchParams.upstreamRequestId,
+    searchParams.billingStatus,
     searchParams.type,
   ])
   const [draft, setDraft] = useState<CommonLogDraft>(() => searchState)
@@ -207,6 +227,7 @@ export function CommonLogsFilterBar<TData>(
       type: [LOG_TYPE_ALL_VALUE],
       startTime: start.getTime(),
       endTime: end.getTime(),
+      billingStatus: 'all' as UpstreamBillingStatusFilter,
     }
     setDraft({
       sourceKey: buildSearchSourceKey(resetSearch),
@@ -235,6 +256,7 @@ export function CommonLogsFilterBar<TData>(
 
   const hasExpandedFilters =
     !!filters.token ||
+    !!filters.group ||
     !!filters.username ||
     !!filters.channel ||
     !!filters.requestId ||
@@ -242,10 +264,14 @@ export function CommonLogsFilterBar<TData>(
 
   const hasTypeFilter = logType !== LOG_TYPE_ALL_VALUE
   const hasAdditionalFilters =
-    !!filters.model || !!filters.group || hasTypeFilter || hasExpandedFilters
+    !!filters.model ||
+    (filters.billingStatus != null && filters.billingStatus !== 'all') ||
+    hasTypeFilter ||
+    hasExpandedFilters
 
   const expandedFilterCount = [
     filters.token,
+    filters.group,
     isAdmin ? filters.username : undefined,
     isAdmin ? filters.channel : undefined,
     filters.requestId,
@@ -262,6 +288,18 @@ export function CommonLogsFilterBar<TData>(
   )
   const logTypeLabel =
     logTypeItems.find((type) => type.value === logType)?.label ?? t('All Types')
+  const billingStatusItems = useMemo(
+    () =>
+      UPSTREAM_BILLING_STATUS_FILTERS.map((status) => ({
+        value: status.value,
+        label: t(status.label),
+      })),
+    [t]
+  )
+  const billingStatus = getBillingStatusValue(filters.billingStatus)
+  const billingStatusLabel =
+    billingStatusItems.find((status) => status.value === billingStatus)
+      ?.label ?? t('All billing statuses')
 
   const statsBar = (
     <div className='flex flex-wrap items-center gap-2'>
@@ -322,6 +360,33 @@ export function CommonLogsFilterBar<TData>(
       />
     </LogsFilterField>
   )
+  const billingStatusFilter = (
+    <LogsFilterField>
+      <Select
+        items={billingStatusItems}
+        value={billingStatus}
+        onValueChange={(value) => {
+          handleChange(
+            'billingStatus',
+            getBillingStatusValue(value) as UpstreamBillingStatusFilter
+          )
+        }}
+      >
+        <SelectTrigger>
+          <SelectValue>{billingStatusLabel}</SelectValue>
+        </SelectTrigger>
+        <SelectContent alignItemWithTrigger={false}>
+          <SelectGroup>
+            {UPSTREAM_BILLING_STATUS_FILTERS.map((status) => (
+              <SelectItem key={status.value} value={status.value}>
+                {t(status.label)}
+              </SelectItem>
+            ))}
+          </SelectGroup>
+        </SelectContent>
+      </Select>
+    </LogsFilterField>
+  )
   const typeFilter = (
     <LogsFilterField>
       <Select
@@ -360,6 +425,7 @@ export function CommonLogsFilterBar<TData>(
   )
   const advancedFilters = (
     <>
+      {groupFilter}
       <LogsFilterField>
         <LogsFilterInput
           placeholder={t('Token Name')}
@@ -418,7 +484,7 @@ export function CommonLogsFilterBar<TData>(
         <>
           {dateRangeFilter}
           {modelFilter}
-          {groupFilter}
+          {billingStatusFilter}
           {typeFilter}
         </>
       }
@@ -427,14 +493,14 @@ export function CommonLogsFilterBar<TData>(
       mobileFilters={
         <>
           {modelFilter}
-          {groupFilter}
+          {billingStatusFilter}
           {typeFilter}
           {advancedFilters}
         </>
       }
       mobileFilterCount={
-        [filters.model, filters.group, hasTypeFilter].filter(Boolean).length +
-        expandedFilterCount
+        [filters.model, billingStatus !== 'all', hasTypeFilter].filter(Boolean)
+          .length + expandedFilterCount
       }
       hasAdvancedActiveFilters={hasExpandedFilters}
       advancedFilterCount={expandedFilterCount}

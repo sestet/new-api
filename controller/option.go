@@ -120,6 +120,108 @@ type OptionUpdateRequest struct {
 	Value any    `json:"value"`
 }
 
+type GroupRatioOptionsRequest struct {
+	GroupRatio              string `json:"group_ratio"`
+	GroupGroupRatio         string `json:"group_group_ratio"`
+	GroupSpecialUsableGroup string `json:"group_special_usable_group"`
+	UserUsableGroups        string `json:"user_usable_groups"`
+}
+
+func UpdateGroupRatioOptions(c *gin.Context) {
+	request := GroupRatioOptionsRequest{}
+	if err := common.DecodeJson(c.Request.Body, &request); err != nil {
+		common.ApiErrorMsg(c, "invalid group ratio settings")
+		return
+	}
+	if err := ratio_setting.CheckGroupRatio(request.GroupRatio); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if err := ratio_setting.CheckGroupGroupRatio(request.GroupGroupRatio); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if err := ratio_setting.CheckGroupSpecialUsableGroup(request.GroupSpecialUsableGroup); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if err := setting.CheckUserUsableGroups(request.UserUsableGroups); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	groupRatios := map[string]float64{}
+	usableGroups := map[string]string{}
+	overrides := map[string]map[string]float64{}
+	specialRules := map[string]map[string]string{}
+	if err := common.UnmarshalJsonStr(request.GroupRatio, &groupRatios); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if err := common.UnmarshalJsonStr(request.UserUsableGroups, &usableGroups); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if err := common.UnmarshalJsonStr(request.GroupGroupRatio, &overrides); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if err := common.UnmarshalJsonStr(request.GroupSpecialUsableGroup, &specialRules); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	for group := range usableGroups {
+		if _, ok := groupRatios[group]; !ok {
+			common.ApiErrorMsg(c, "every usable group requires a billing ratio: "+group)
+			return
+		}
+	}
+	for userGroup, usingGroups := range overrides {
+		if _, ok := groupRatios[userGroup]; !ok {
+			common.ApiErrorMsg(c, "unknown user group in override: "+userGroup)
+			return
+		}
+		for usingGroup := range usingGroups {
+			if _, ok := groupRatios[usingGroup]; !ok {
+				common.ApiErrorMsg(c, "unknown using group in override: "+usingGroup)
+				return
+			}
+		}
+	}
+	for userGroup, rules := range specialRules {
+		if _, ok := groupRatios[userGroup]; !ok {
+			common.ApiErrorMsg(c, "unknown user group in special usable rule: "+userGroup)
+			return
+		}
+		for rawGroup := range rules {
+			targetGroup := rawGroup
+			if strings.HasPrefix(rawGroup, "+:") || strings.HasPrefix(rawGroup, "-:") {
+				targetGroup = rawGroup[2:]
+			}
+			if _, ok := groupRatios[targetGroup]; !ok {
+				common.ApiErrorMsg(c, "unknown target group in special usable rule: "+targetGroup)
+				return
+			}
+		}
+	}
+
+	if err := model.UpdateOptionsBulk(map[string]string{
+		"GroupRatio":              request.GroupRatio,
+		"GroupGroupRatio":         request.GroupGroupRatio,
+		"GroupSpecialUsableGroup": request.GroupSpecialUsableGroup,
+		"UserUsableGroups":        request.UserUsableGroups,
+	}); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	recordManageAudit(c, "option.group_ratio.update", map[string]interface{}{
+		"group_count":         len(groupRatios),
+		"override_count":      len(overrides),
+		"special_rule_groups": len(specialRules),
+	})
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": ""})
+}
+
 func UpdateOption(c *gin.Context) {
 	var option OptionUpdateRequest
 	err := common.DecodeJson(c.Request.Body, &option)
@@ -227,12 +329,23 @@ func UpdateOption(c *gin.Context) {
 			return
 		}
 	case "GroupRatio":
-		err = ratio_setting.CheckGroupRatio(option.Value.(string))
-		if err != nil {
-			c.JSON(http.StatusOK, gin.H{
-				"success": false,
-				"message": err.Error(),
-			})
+		if err = ratio_setting.CheckGroupRatio(option.Value.(string)); err != nil {
+			common.ApiError(c, err)
+			return
+		}
+	case "GroupGroupRatio":
+		if err = ratio_setting.CheckGroupGroupRatio(option.Value.(string)); err != nil {
+			common.ApiError(c, err)
+			return
+		}
+	case "GroupSpecialUsableGroup":
+		if err = ratio_setting.CheckGroupSpecialUsableGroup(option.Value.(string)); err != nil {
+			common.ApiError(c, err)
+			return
+		}
+	case "UserUsableGroups":
+		if err = setting.CheckUserUsableGroups(option.Value.(string)); err != nil {
+			common.ApiError(c, err)
 			return
 		}
 	case "ImageRatio":

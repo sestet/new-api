@@ -18,32 +18,32 @@ const overflowingProduct = 2000 * 1.8446744073686647e19
 // instead of wrapping into a negative charge (credit). QuotaFromFloat
 // truncates toward zero.
 func TestQuotaFromFloat(t *testing.T) {
-	assert.Equal(t, 42, QuotaFromFloat(42.4))
-	assert.Equal(t, 42, QuotaFromFloat(42.9))
-	assert.Equal(t, -42, QuotaFromFloat(-42.9))
+	assert.Equal(t, int64(42), QuotaFromFloat(42.4))
+	assert.Equal(t, int64(42), QuotaFromFloat(42.9))
+	assert.Equal(t, int64(-42), QuotaFromFloat(-42.9))
 	assert.Equal(t, MaxQuota, QuotaFromFloat(overflowingProduct))
 	assert.Equal(t, MinQuota, QuotaFromFloat(-overflowingProduct))
 	assert.Equal(t, MaxQuota, QuotaFromFloat(math.Inf(1)))
 	assert.Equal(t, MinQuota, QuotaFromFloat(math.Inf(-1)))
-	assert.Equal(t, 0, QuotaFromFloat(math.NaN()))
+	assert.Equal(t, int64(0), QuotaFromFloat(math.NaN()))
 }
 
 // TestQuotaRound checks half-away-from-zero rounding with the same
 // saturation policy.
 func TestQuotaRound(t *testing.T) {
-	assert.Equal(t, 42, QuotaRound(41.5))
-	assert.Equal(t, 43, QuotaRound(42.5))
-	assert.Equal(t, -43, QuotaRound(-42.5))
+	assert.Equal(t, int64(42), QuotaRound(41.5))
+	assert.Equal(t, int64(43), QuotaRound(42.5))
+	assert.Equal(t, int64(-43), QuotaRound(-42.5))
 	assert.Equal(t, MaxQuota, QuotaRound(overflowingProduct))
 	assert.Equal(t, MinQuota, QuotaRound(-overflowingProduct))
-	assert.Equal(t, 0, QuotaRound(math.NaN()))
+	assert.Equal(t, int64(0), QuotaRound(math.NaN()))
 }
 
 // TestQuotaFromDecimal checks the decimal entry point rounds and saturates
 // consistently with the float variants.
 func TestQuotaFromDecimal(t *testing.T) {
-	assert.Equal(t, 43, QuotaFromDecimal(decimal.NewFromFloat(42.5)))
-	assert.Equal(t, 42, QuotaFromDecimal(decimal.NewFromFloat(41.7)))
+	assert.Equal(t, int64(43), QuotaFromDecimal(decimal.NewFromFloat(42.5)))
+	assert.Equal(t, int64(42), QuotaFromDecimal(decimal.NewFromFloat(41.7)))
 	assert.Equal(t, MaxQuota, QuotaFromDecimal(decimal.NewFromInt(2000).Mul(decimal.NewFromFloat(1.8446744073686647e19))))
 	assert.Equal(t, MinQuota, QuotaFromDecimal(decimal.NewFromInt(-2000).Mul(decimal.NewFromFloat(1.8446744073686647e19))))
 }
@@ -53,7 +53,7 @@ func TestQuotaFromDecimal(t *testing.T) {
 // audit the event.
 func TestQuotaFromFloatChecked(t *testing.T) {
 	quota, clamp := QuotaFromFloatChecked(42.9)
-	assert.Equal(t, 42, quota)
+	assert.Equal(t, int64(42), quota)
 	assert.Nil(t, clamp)
 
 	quota, clamp = QuotaFromFloatChecked(overflowingProduct)
@@ -72,17 +72,17 @@ func TestQuotaFromFloatChecked(t *testing.T) {
 	}
 
 	quota, clamp = QuotaFromFloatChecked(math.NaN())
-	assert.Equal(t, 0, quota)
+	assert.Equal(t, int64(0), quota)
 	if assert.NotNil(t, clamp) {
 		assert.Equal(t, QuotaClampNaN, clamp.Kind)
-		assert.Equal(t, 0, clamp.Clamped)
+		assert.Equal(t, int64(0), clamp.Clamped)
 	}
 }
 
 func TestQuotaFromFloatStrictReturnsTypedClampError(t *testing.T) {
 	quota, err := QuotaFromFloatStrict(42.9)
 	require.NoError(t, err)
-	assert.Equal(t, 42, quota)
+	assert.Equal(t, int64(42), quota)
 
 	quota, err = QuotaFromFloatStrict(overflowingProduct)
 	assert.Zero(t, quota)
@@ -93,14 +93,37 @@ func TestQuotaFromFloatStrictReturnsTypedClampError(t *testing.T) {
 	assert.ErrorContains(t, err, "QuotaFromFloat")
 	assert.ErrorContains(t, err, "overflow")
 	assert.ErrorContains(t, err, "original=")
-	assert.ErrorContains(t, err, "clamped=2147483647")
+	assert.ErrorContains(t, err, "clamped=9007199254740991")
+}
+
+func TestQuotaConversionAcceptsExactSafeIntegerBounds(t *testing.T) {
+	quota, err := QuotaFromFloatStrict(float64(MaxQuota))
+	require.NoError(t, err)
+	assert.Equal(t, MaxQuota, quota)
+
+	quota, err = QuotaFromFloatStrict(float64(MinQuota))
+	require.NoError(t, err)
+	assert.Equal(t, MinQuota, quota)
+
+	quota, err = QuotaFromDecimalStrict(decimal.NewFromInt(MaxQuota))
+	require.NoError(t, err)
+	assert.Equal(t, MaxQuota, quota)
+
+	quota, err = QuotaFromDecimalStrict(decimal.NewFromInt(MinQuota))
+	require.NoError(t, err)
+	assert.Equal(t, MinQuota, quota)
+}
+
+func TestQuotaPrecisionAtEightDecimalPlaces(t *testing.T) {
+	assert.Equal(t, int64(5_031), QuotaFromDecimal(decimal.RequireFromString("0.00005031").Mul(decimal.NewFromInt(100_000_000))))
+	assert.Equal(t, int64(5_109), QuotaFromDecimal(decimal.RequireFromString("0.00005109").Mul(decimal.NewFromInt(100_000_000))))
 }
 
 // TestQuotaRoundChecked verifies the rounding entry point reports clamps the
 // same way.
 func TestQuotaRoundChecked(t *testing.T) {
 	quota, clamp := QuotaRoundChecked(42.5)
-	assert.Equal(t, 43, quota)
+	assert.Equal(t, int64(43), quota)
 	assert.Nil(t, clamp)
 
 	quota, clamp = QuotaRoundChecked(overflowingProduct)
@@ -114,7 +137,7 @@ func TestQuotaRoundChecked(t *testing.T) {
 // TestQuotaFromDecimalChecked verifies the decimal entry point reports clamps.
 func TestQuotaFromDecimalChecked(t *testing.T) {
 	quota, clamp := QuotaFromDecimalChecked(decimal.NewFromFloat(41.7))
-	assert.Equal(t, 42, quota)
+	assert.Equal(t, int64(42), quota)
 	assert.Nil(t, clamp)
 
 	quota, clamp = QuotaFromDecimalChecked(decimal.NewFromInt(2000).Mul(decimal.NewFromFloat(1.8446744073686647e19)))

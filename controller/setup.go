@@ -109,7 +109,7 @@ func PostSetup(c *gin.Context) {
 			Status:      common.UserStatusEnabled,
 			DisplayName: "Root User",
 			AccessToken: nil,
-			Quota:       100000000,
+			Quota:       20_000_000_000,
 		}
 		err = model.DB.Create(&rootUser).Error
 		if err != nil {

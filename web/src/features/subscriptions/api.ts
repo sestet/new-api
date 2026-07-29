@@ -30,6 +30,8 @@ import type {
   SubscriptionPayResponse,
   SubscriptionPayRequest,
   SelfSubscriptionData,
+  AdminUserSubscriptionsParams,
+  AdminUserSubscriptionsResponse,
 } from './types'
 
 // ============================================================================
@@ -69,6 +71,15 @@ export async function patchPlanStatus(
 // ============================================================================
 // Admin User Subscription Management
 // ============================================================================
+
+export async function getAdminUserSubscriptions(
+  params: AdminUserSubscriptionsParams
+): Promise<AdminUserSubscriptionsResponse> {
+  const res = await api.get('/api/subscription/admin/user_subscriptions', {
+    params,
+  })
+  return res.data
+}
 
 export async function getUserSubscriptions(
   userId: number

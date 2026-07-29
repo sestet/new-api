@@ -54,7 +54,7 @@ type Task struct {
 	UserId     int                   `json:"user_id" gorm:"index"`
 	Group      string                `json:"group" gorm:"type:varchar(50)"` // 修正计费用
 	ChannelId  int                   `json:"channel_id" gorm:"index"`
-	Quota      int                   `json:"quota"`
+	Quota      int64                 `json:"quota" gorm:"type:bigint"`
 	Action     string                `json:"action" gorm:"type:varchar(40);index"` // 任务类型, song, lyrics, description-mode
 	Status     TaskStatus            `json:"status" gorm:"type:varchar(20);index"` // 任务状态
 	FailReason string                `json:"fail_reason"`
@@ -114,12 +114,15 @@ type TaskPrivateData struct {
 
 // TaskBillingContext 记录任务提交时的计费参数，以便轮询阶段可以重新计算额度。
 type TaskBillingContext struct {
-	ModelPrice      float64            `json:"model_price,omitempty"`       // 模型单价
-	GroupRatio      float64            `json:"group_ratio,omitempty"`       // 分组倍率
-	ModelRatio      float64            `json:"model_ratio,omitempty"`       // 模型倍率
-	OtherRatios     map[string]float64 `json:"other_ratios,omitempty"`      // 附加倍率（时长、分辨率等）
-	OriginModelName string             `json:"origin_model_name,omitempty"` // 模型名称，必须为OriginModelName
-	PerCallBilling  bool               `json:"per_call_billing,omitempty"`  // 按次计费：跳过轮询阶段的差额结算
+	ModelPrice       float64            `json:"model_price,omitempty"`        // 模型单价
+	UserGroup        string             `json:"user_group,omitempty"`         // 提交时的用户分组
+	UsingGroup       string             `json:"using_group,omitempty"`        // 提交时实际使用的渠道分组
+	GroupRatio       float64            `json:"group_ratio,omitempty"`        // 提交时的最终分组倍率
+	GroupRatioSource string             `json:"group_ratio_source,omitempty"` // 分组倍率来源
+	ModelRatio       float64            `json:"model_ratio,omitempty"`        // 模型倍率
+	OtherRatios      map[string]float64 `json:"other_ratios,omitempty"`       // 附加倍率（时长、分辨率等）
+	OriginModelName  string             `json:"origin_model_name,omitempty"`  // 模型名称，必须为OriginModelName
+	PerCallBilling   bool               `json:"per_call_billing,omitempty"`   // 按次计费：跳过轮询阶段的差额结算
 }
 
 // GetUpstreamTaskID 获取上游真实 task ID（用于与 provider 通信）
@@ -467,7 +470,7 @@ func (t *Task) UpdateQuota() error {
 
 // ClaimQuotaForRefund atomically clears an expected non-zero quota. A true
 // result grants the caller ownership of the corresponding refund attempt.
-func ClaimQuotaForRefund(id int64, expectedQuota int) (bool, error) {
+func ClaimQuotaForRefund(id int64, expectedQuota int64) (bool, error) {
 	if expectedQuota == 0 {
 		return false, nil
 	}
@@ -484,7 +487,7 @@ func ClaimQuotaForRefund(id int64, expectedQuota int) (bool, error) {
 // RestoreQuotaAfterFailedRefund restores a claimed quota marker only while it
 // is still zero. It is used when the observable funding adjustment fails, so a
 // later reconciliation pass can retry without overwriting another writer.
-func RestoreQuotaAfterFailedRefund(id int64, quota int) (bool, error) {
+func RestoreQuotaAfterFailedRefund(id int64, quota int64) (bool, error) {
 	if quota == 0 {
 		return false, nil
 	}

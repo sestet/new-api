@@ -10,9 +10,10 @@ import (
 
 // from songquanpeng/one-api
 const (
-	USD2RMB = 7.3 // 暂定 1 USD = 7.3 RMB
-	USD     = 500 // $0.002 = 1 -> $1 = 500
-	RMB     = USD / USD2RMB
+	USD2RMB                = 7.3        // 暂定 1 USD = 7.3 RMB
+	USD                    = 500        // $0.002 = 1 -> $1 = 500
+	ModelRatioTokensPerUSD = 1000 * USD // model ratio 1 means $0.002 per 1K tokens
+	RMB                    = USD / USD2RMB
 )
 
 // modelRatio

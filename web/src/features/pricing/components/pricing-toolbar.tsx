@@ -86,7 +86,6 @@ export interface PricingToolbarProps {
   onTagChange: (value: string) => void
   vendors: PricingVendor[]
   groups: string[]
-  groupRatios?: Record<string, number>
   tags: string[]
   models: PricingModel[]
   hasActiveFilters: boolean
@@ -134,7 +133,7 @@ function SegmentedControl(props: {
 
         return (
           <Tooltip key={option.value}>
-            <TooltipTrigger render={button}></TooltipTrigger>
+            <TooltipTrigger render={button} />
             <TooltipContent side='bottom' className='text-xs'>
               {option.tooltip}
             </TooltipContent>
@@ -298,7 +297,6 @@ export function PricingToolbar(props: PricingToolbarProps) {
               onTagChange={props.onTagChange}
               vendors={props.vendors}
               groups={props.groups}
-              groupRatios={props.groupRatios}
               tags={props.tags}
               models={props.models}
               hasActiveFilters={props.hasActiveFilters}

@@ -33,6 +33,11 @@ const logTypeSearchSchema = z
   }, z.array(z.enum(logTypeValues)).optional())
   .catch([])
 
+const billingStatusSearchSchema = z
+  .enum(['all', 'exact', 'waiting', 'estimated', 'pending', 'failed'])
+  .optional()
+  .catch('all')
+
 const usageLogsSearchSchema = z.object({
   page: z.number().optional().catch(1),
   pageSize: z.number().optional().catch(undefined),
@@ -45,6 +50,7 @@ const usageLogsSearchSchema = z.object({
   username: z.string().optional().catch(''),
   requestId: z.string().optional().catch(''),
   upstreamRequestId: z.string().optional().catch(''),
+  billingStatus: billingStatusSearchSchema,
   startTime: z.number().optional(),
   endTime: z.number().optional(),
 })

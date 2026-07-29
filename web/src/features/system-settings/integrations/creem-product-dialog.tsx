@@ -246,7 +246,7 @@ export function CreemProductDialog({
                   <Input
                     type='number'
                     min={1}
-                    placeholder={t('e.g., 500000')}
+                    placeholder={t('e.g., 100000000')}
                     {...safeNumberFieldProps(field)}
                   />
                 </FormControl>

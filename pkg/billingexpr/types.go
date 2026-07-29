@@ -43,23 +43,23 @@ type BillingSnapshot struct {
 	ModelName                 string  `json:"model_name"`
 	ExprString                string  `json:"expr_string"`
 	ExprHash                  string  `json:"expr_hash"`
-	GroupRatio                float64 `json:"group_ratio"`
 	EstimatedPromptTokens     int     `json:"estimated_prompt_tokens"`
 	EstimatedCompletionTokens int     `json:"estimated_completion_tokens"`
-	EstimatedQuotaBeforeGroup float64 `json:"estimated_quota_before_group"`
-	EstimatedQuotaAfterGroup  int     `json:"estimated_quota_after_group"`
+	EstimatedQuota            int64   `json:"estimated_quota"`
 	EstimatedTier             string  `json:"estimated_tier"`
 	QuotaPerUnit              float64 `json:"quota_per_unit"`
 	ExprVersion               int     `json:"expr_version"`
+	GroupRatio                float64 `json:"group_ratio"`
+	GroupRatioSource          string  `json:"group_ratio_source"`
 }
 
 // TieredResult holds everything needed after running tiered settlement.
 type TieredResult struct {
-	ActualQuotaBeforeGroup float64 `json:"actual_quota_before_group"`
-	ActualQuotaAfterGroup  int     `json:"actual_quota_after_group"`
-	MatchedTier            string  `json:"matched_tier"`
-	CrossedTier            bool    `json:"crossed_tier"`
-	// Clamp records an int32 saturation event during quota conversion so the
+	ActualQuotaRaw float64 `json:"actual_quota_raw"`
+	ActualQuota    int64   `json:"actual_quota"`
+	MatchedTier    string  `json:"matched_tier"`
+	CrossedTier    bool    `json:"crossed_tier"`
+	// Clamp records a saturation event during quota conversion so the
 	// caller can surface it on the consume log for admin auditing. Nil when no
 	// clamping occurred. Not serialized: the marker is attached separately via
 	// the shared quota-saturation audit path.

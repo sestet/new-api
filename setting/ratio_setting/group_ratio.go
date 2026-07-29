@@ -1,82 +1,51 @@
 package ratio_setting
 
 import (
-	"encoding/json"
 	"errors"
+	"fmt"
+	"math"
+	"strings"
+	"sync"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/types"
 )
 
-var defaultGroupRatio = map[string]float64{
-	"default": 1,
-	"vip":     1,
-	"svip":    1,
-}
+const defaultGroupName = "default"
 
 var groupRatioMap = types.NewRWMap[string, float64]()
-
-var defaultGroupGroupRatio = map[string]map[string]float64{
-	"vip": {
-		"edit_this": 0.9,
-	},
-}
-
 var groupGroupRatioMap = types.NewRWMap[string, map[string]float64]()
-
-var defaultGroupSpecialUsableGroup = map[string]map[string]string{}
-
-type GroupRatioSetting struct {
-	GroupRatio              *types.RWMap[string, float64]            `json:"group_ratio"`
-	GroupGroupRatio         *types.RWMap[string, map[string]float64] `json:"group_group_ratio"`
-	GroupSpecialUsableGroup *types.RWMap[string, map[string]string]  `json:"group_special_usable_group"`
-}
-
-var groupRatioSetting GroupRatioSetting
+var groupSpecialUsableGroupMap = types.NewRWMap[string, map[string]string]()
+var groupRatioSettingsMutex sync.RWMutex
 
 func init() {
-	groupSpecialUsableGroup := types.NewRWMap[string, map[string]string]()
-	groupSpecialUsableGroup.AddAll(defaultGroupSpecialUsableGroup)
-
-	groupRatioMap.AddAll(defaultGroupRatio)
-	groupGroupRatioMap.AddAll(defaultGroupGroupRatio)
-
-	groupRatioSetting = GroupRatioSetting{
-		GroupSpecialUsableGroup: groupSpecialUsableGroup,
-		GroupRatio:              groupRatioMap,
-		GroupGroupRatio:         groupGroupRatioMap,
-	}
-
-	config.GlobalConfig.Register("group_ratio_setting", &groupRatioSetting)
-}
-
-func GetGroupRatioSetting() *GroupRatioSetting {
-	if groupRatioSetting.GroupSpecialUsableGroup == nil {
-		groupRatioSetting.GroupSpecialUsableGroup = types.NewRWMap[string, map[string]string]()
-		groupRatioSetting.GroupSpecialUsableGroup.AddAll(defaultGroupSpecialUsableGroup)
-	}
-	return &groupRatioSetting
+	groupRatioMap.Set(defaultGroupName, 1)
 }
 
 func GetGroupRatioCopy() map[string]float64 {
+	groupRatioSettingsMutex.RLock()
+	defer groupRatioSettingsMutex.RUnlock()
 	return groupRatioMap.ReadAll()
 }
 
-func ContainsGroupRatio(name string) bool {
-	_, ok := groupRatioMap.Get(name)
-	return ok
-}
-
 func GroupRatio2JSONString() string {
+	groupRatioSettingsMutex.RLock()
+	defer groupRatioSettingsMutex.RUnlock()
 	return groupRatioMap.MarshalJSONString()
 }
 
 func UpdateGroupRatioByJSONString(jsonStr string) error {
+	if err := CheckGroupRatio(jsonStr); err != nil {
+		return err
+	}
+	groupRatioSettingsMutex.Lock()
+	defer groupRatioSettingsMutex.Unlock()
 	return types.LoadFromJsonString(groupRatioMap, jsonStr)
 }
 
 func GetGroupRatio(name string) float64 {
+	groupRatioSettingsMutex.RLock()
+	defer groupRatioSettingsMutex.RUnlock()
 	ratio, ok := groupRatioMap.Get(name)
 	if !ok {
 		common.SysLog("group ratio not found: " + name)
@@ -85,36 +54,178 @@ func GetGroupRatio(name string) float64 {
 	return ratio
 }
 
-func GetGroupGroupRatio(userGroup, usingGroup string) (float64, bool) {
-	gp, ok := groupGroupRatioMap.Get(userGroup)
-	if !ok {
-		return -1, false
+func GetGroupGroupRatioCopy() map[string]map[string]float64 {
+	groupRatioSettingsMutex.RLock()
+	defer groupRatioSettingsMutex.RUnlock()
+	return groupGroupRatioMap.ReadAll()
+}
+
+func GroupSpecialUsableGroup2JSONString() string {
+	groupRatioSettingsMutex.RLock()
+	defer groupRatioSettingsMutex.RUnlock()
+	return groupSpecialUsableGroupMap.MarshalJSONString()
+}
+
+func UpdateGroupSpecialUsableGroupByJSONString(jsonStr string) error {
+	if err := CheckGroupSpecialUsableGroup(jsonStr); err != nil {
+		return err
 	}
-	ratio, ok := gp[usingGroup]
+	groupRatioSettingsMutex.Lock()
+	defer groupRatioSettingsMutex.Unlock()
+	return types.LoadFromJsonString(groupSpecialUsableGroupMap, jsonStr)
+}
+
+func GetGroupSpecialUsableGroups(userGroup string) map[string]string {
+	groupRatioSettingsMutex.RLock()
+	defer groupRatioSettingsMutex.RUnlock()
+	groups, ok := groupSpecialUsableGroupMap.Get(userGroup)
 	if !ok {
-		return -1, false
+		return nil
 	}
-	return ratio, true
+	copy := make(map[string]string, len(groups))
+	for group, description := range groups {
+		copy[group] = description
+	}
+	return copy
 }
 
 func GroupGroupRatio2JSONString() string {
+	groupRatioSettingsMutex.RLock()
+	defer groupRatioSettingsMutex.RUnlock()
 	return groupGroupRatioMap.MarshalJSONString()
 }
 
 func UpdateGroupGroupRatioByJSONString(jsonStr string) error {
+	if err := CheckGroupGroupRatio(jsonStr); err != nil {
+		return err
+	}
+	groupRatioSettingsMutex.Lock()
+	defer groupRatioSettingsMutex.Unlock()
 	return types.LoadFromJsonString(groupGroupRatioMap, jsonStr)
 }
 
-func CheckGroupRatio(jsonStr string) error {
-	checkGroupRatio := make(map[string]float64)
-	err := json.Unmarshal([]byte(jsonStr), &checkGroupRatio)
-	if err != nil {
+func GetGroupGroupRatio(userGroup, usingGroup string) (float64, bool) {
+	groupRatioSettingsMutex.RLock()
+	defer groupRatioSettingsMutex.RUnlock()
+	groupRatios, ok := groupGroupRatioMap.Get(userGroup)
+	if !ok {
+		return 0, false
+	}
+	ratio, ok := groupRatios[usingGroup]
+	return ratio, ok
+}
+
+func ResolveGroupRatio(userGroup, usingGroup string) (float64, string) {
+	groupRatioSettingsMutex.RLock()
+	defer groupRatioSettingsMutex.RUnlock()
+
+	if groupRatios, ok := groupGroupRatioMap.Get(userGroup); ok {
+		if ratio, exists := groupRatios[usingGroup]; exists {
+			return ratio, "group_group_ratio"
+		}
+	}
+	ratio, ok := groupRatioMap.Get(usingGroup)
+	if ok {
+		return ratio, "group_ratio"
+	}
+	common.SysLog("group ratio not found: " + usingGroup)
+	return 1, "group_ratio"
+}
+
+func UpdateGroupRatioOptionsByJSONString(groupRatioJSON, groupGroupRatioJSON, groupSpecialUsableGroupJSON string) error {
+	if err := CheckGroupRatio(groupRatioJSON); err != nil {
 		return err
 	}
-	for name, ratio := range checkGroupRatio {
-		if ratio < 0 {
-			return errors.New("group ratio must be not less than 0: " + name)
+	if err := CheckGroupGroupRatio(groupGroupRatioJSON); err != nil {
+		return err
+	}
+	if err := CheckGroupSpecialUsableGroup(groupSpecialUsableGroupJSON); err != nil {
+		return err
+	}
+
+	groupRatioSettingsMutex.Lock()
+	defer groupRatioSettingsMutex.Unlock()
+	if err := types.LoadFromJsonString(groupRatioMap, groupRatioJSON); err != nil {
+		return err
+	}
+	if err := types.LoadFromJsonString(groupGroupRatioMap, groupGroupRatioJSON); err != nil {
+		return err
+	}
+	return types.LoadFromJsonString(groupSpecialUsableGroupMap, groupSpecialUsableGroupJSON)
+}
+
+func CheckGroupRatio(jsonStr string) error {
+	groupRatios := make(map[string]float64)
+	if err := common.UnmarshalJsonStr(jsonStr, &groupRatios); err != nil {
+		return err
+	}
+	if len(groupRatios) == 0 {
+		return errors.New("at least one group is required")
+	}
+	if _, ok := groupRatios[defaultGroupName]; !ok {
+		return errors.New("default group is required")
+	}
+	for group, ratio := range groupRatios {
+		if strings.TrimSpace(group) == "" {
+			return errors.New("group name cannot be empty")
 		}
+		if err := validateBillingRatio(group, ratio); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func CheckGroupGroupRatio(jsonStr string) error {
+	overrides := make(map[string]map[string]float64)
+	if err := common.UnmarshalJsonStr(jsonStr, &overrides); err != nil {
+		return err
+	}
+	for userGroup, groupRatios := range overrides {
+		if strings.TrimSpace(userGroup) == "" {
+			return errors.New("user group name cannot be empty")
+		}
+		for usingGroup, ratio := range groupRatios {
+			if strings.TrimSpace(usingGroup) == "" {
+				return errors.New("using group name cannot be empty")
+			}
+			if err := validateBillingRatio(userGroup+" -> "+usingGroup, ratio); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func CheckGroupSpecialUsableGroup(jsonStr string) error {
+	rules := make(map[string]map[string]string)
+	if err := common.UnmarshalJsonStr(jsonStr, &rules); err != nil {
+		return err
+	}
+	for userGroup, groupRules := range rules {
+		if strings.TrimSpace(userGroup) == "" {
+			return errors.New("user group name cannot be empty")
+		}
+		for rawGroup, description := range groupRules {
+			targetGroup := rawGroup
+			hidden := strings.HasPrefix(rawGroup, "-:")
+			if hidden || strings.HasPrefix(rawGroup, "+:") {
+				targetGroup = rawGroup[2:]
+			}
+			if strings.TrimSpace(targetGroup) == "" {
+				return errors.New("special usable group name cannot be empty")
+			}
+			if !hidden && strings.TrimSpace(description) == "" {
+				return errors.New("special usable group description cannot be empty: " + targetGroup)
+			}
+		}
+	}
+	return nil
+}
+
+func validateBillingRatio(name string, ratio float64) error {
+	if ratio < 0 || math.IsNaN(ratio) || math.IsInf(ratio, 0) {
+		return fmt.Errorf("group ratio must be a finite non-negative number: %s", name)
 	}
 	return nil
 }

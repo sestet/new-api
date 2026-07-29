@@ -19,7 +19,7 @@ var TopUpLink = ""
 
 // var ChatLink = ""
 // var ChatLink2 = ""
-var QuotaPerUnit = 500 * 1000.0 // $0.002 / 1K tokens
+var QuotaPerUnit = 100_000_000.0 // 1 quota = $0.00000001
 // 保留旧变量以兼容历史逻辑，实际展示由 general_setting.quota_display_type 控制
 var DisplayInCurrencyEnabled = true
 var DisplayTokenStatEnabled = true
@@ -121,13 +121,13 @@ var TurnstileSecretKey = ""
 var TelegramBotToken = ""
 var TelegramBotName = ""
 
-var QuotaForNewUser = 0
-var QuotaForInviter = 0
-var QuotaForInvitee = 0
+var QuotaForNewUser int64
+var QuotaForInviter int64
+var QuotaForInvitee int64
 var ChannelDisableThreshold = 5.0
 var AutomaticDisableChannelEnabled = false
 var AutomaticEnableChannelEnabled = false
-var QuotaRemindThreshold = 1000
+var QuotaRemindThreshold int64 = 200_000
 var PreConsumedQuota = 500
 
 var RetryTimes = 0
@@ -171,8 +171,9 @@ var GeminiSafetySetting string
 var CohereSafetySetting string
 
 const (
-	RequestIdKey         = "X-Oneapi-Request-Id"
-	UpstreamRequestIdKey = "X-Upstream-Request-Id"
+	RequestIdKey                = "X-Oneapi-Request-Id"
+	UpstreamRequestIdKey        = "X-Upstream-Request-Id"
+	UpstreamBillingRequestIdKey = "X-Upstream-Billing-Request-Id"
 )
 
 const (
@@ -205,7 +206,7 @@ var (
 	GlobalWebRateLimitDuration int64
 
 	CriticalRateLimitEnable   bool
-	CriticalRateLimitNum            = 20
+	CriticalRateLimitNum            = 300
 	CriticalRateLimitDuration int64 = 20 * 60
 
 	UploadRateLimitNum            = 10

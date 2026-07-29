@@ -16,8 +16,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { z } from 'zod'
-
 import {
   type PermissionCatalog,
   type AdminPermissionMatrix,
@@ -27,26 +25,14 @@ import { quotaUnitsToDollars } from '@/lib/format'
 import { ROLE } from '@/lib/roles'
 
 import { DEFAULT_GROUP } from '../constants'
-import { type UserFormData, type User } from '../types'
+import type { UserFormData, User } from '../types'
+import { userFormSchema, type UserFormValues } from './user-form-schema'
 
 // ============================================================================
 // Form Schema
 // ============================================================================
 
-export const userFormSchema = z.object({
-  username: z.string().min(1, 'Username is required'),
-  display_name: z.string().optional(),
-  password: z.string().optional(),
-  role: z.number().optional(),
-  quota_dollars: z.number().min(0).optional(),
-  group: z.string().optional(),
-  remark: z.string().optional(),
-  admin_permissions: z
-    .record(z.string(), z.record(z.string(), z.boolean()))
-    .optional(),
-})
-
-export type UserFormValues = z.infer<typeof userFormSchema>
+export { userFormSchema, type UserFormValues }
 
 // ============================================================================
 // Form Defaults

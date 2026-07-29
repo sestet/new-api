@@ -234,12 +234,6 @@ func PublishUserAuthCache(userId int) error {
 	return updateUserCache(*user)
 }
 
-// InitializeUserAuthVersions must run after AutoMigrate when upgrading an
-// existing database. It is idempotent and portable across all supported DBs.
-func InitializeUserAuthVersions() error {
-	return DB.Model(&User{}).Where("auth_version IS NULL OR auth_version < ?", 1).Update("auth_version", 1).Error
-}
-
 func updateUserCacheFieldAtVersion(userId int, field string, value interface{}, authVersion int64) error {
 	if !common.RedisEnabled {
 		return nil

@@ -163,9 +163,8 @@ Proof 同时绑定用户、登录会话、用户鉴权版本、会话版本和 s
 ## 升级注意事项
 
 - 旧 `session` Cookie 不再使用；升级后现有面板登录会失效，用户需要重新登录。
-- 数据库迁移会新增 `user_sessions`、`auth_flows`、`external_identity_claims` 和 `users.auth_version`，并为已有用户初始化鉴权版本、回填 Telegram 账号唯一归属；若历史数据中同一 Telegram ID 已绑定多个用户，迁移会拒绝继续启动，需先消除歧义。
-- 数据库迁移会为 Session 签发计数和分批清理新增索引；已有 `user_sessions` 很大时应为首次启动预留维护窗口。
-- `user_sessions.previous_refresh_hash` 会从定长 `char(64)` 迁移为 `varchar(64)`。应用会兼容读取历史定长字段留下的空格填充；迁移后的目标结构必须保持幂等，连续启动不应反复执行列类型变更。
+- 当前开发阶段只支持全新数据库，`user_sessions`、`auth_flows`、`external_identity_claims` 和相关索引由当前 GORM 模型在初始化时直接创建，不回填旧用户或旧 Telegram 绑定。
+- `user_sessions.previous_refresh_hash` 的当前初始结构为可空 `varchar(64)`；旧库不会自动转换。更新开发代码后请按[开发阶段数据库策略](./customization/database.md)重建数据库。
 - 仅 master 节点定时清理过期登录会话、超过配置保留期的 revoked 会话和已过保留期的 AuthFlow。
 - 未配置 `TRUSTED_PROXIES` 时会兼容信任回环和常见私网代理；使用公网负载均衡器、`100.64.0.0/10`、链路本地地址或自定义 CNI 网段的部署仍需显式配置。需要严格忽略所有转发头时设置为 `none`。
 - Redis 限流从近似滑动窗口改为原子固定窗口，存在明确的边界双倍突发语义。

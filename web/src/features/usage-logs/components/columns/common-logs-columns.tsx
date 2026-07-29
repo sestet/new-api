@@ -16,9 +16,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useQuery } from '@tanstack/react-query'
 import type { ColumnDef } from '@tanstack/react-table'
 import { GitBranch, Sparkles, KeyRound } from 'lucide-react'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { GroupBadge } from '@/components/group-badge'
@@ -35,6 +36,10 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import {
+  getUpstreamBillingAccounts,
+  upstreamBillingAccountsQueryKey,
+} from '@/features/channels/api'
 import { getUserAvatarFallback, getUserAvatarStyle } from '@/lib/avatar'
 import { formatBillingCurrencyFromUSD } from '@/lib/currency'
 import { formatLogQuota, formatTimestampToDate } from '@/lib/format'
@@ -50,6 +55,11 @@ import {
   isViolationFeeLog,
   renderAuditContent,
 } from '../../lib/format'
+import { getAdminBillingBreakdown } from '../../lib/admin-billing-breakdown'
+import {
+  getUpstreamBillingProviderLabel,
+  getUpstreamBillingStatusPresentation,
+} from '../../lib/upstream-billing-status'
 import {
   isDisplayableLogType,
   isTimingLogType,
@@ -66,31 +76,6 @@ interface DetailSegment {
   text: string
   muted?: boolean
   danger?: boolean
-}
-
-function formatRatioCompact(ratio: number | undefined): string {
-  if (ratio == null || !Number.isFinite(ratio)) return '-'
-  return ratio % 1 === 0
-    ? String(ratio)
-    : ratio.toFixed(4).replace(/\.?0+$/, '')
-}
-
-function getGroupRatio(other: LogOtherData | null): number | null {
-  const userGroupRatio = other?.user_group_ratio
-  if (
-    userGroupRatio != null &&
-    userGroupRatio !== -1 &&
-    Number.isFinite(userGroupRatio)
-  ) {
-    return userGroupRatio
-  }
-
-  const groupRatio = other?.group_ratio
-  if (groupRatio != null && groupRatio !== 1 && Number.isFinite(groupRatio)) {
-    return groupRatio
-  }
-
-  return null
 }
 
 function splitQuotaDisplay(value: string): { prefix: string; amount: string } {
@@ -258,23 +243,6 @@ function buildTypeDetailSegments(
           })
         }
       }
-    } else {
-      const userGroupRatio = other.user_group_ratio
-      const groupRatio = other.group_ratio
-      const isUserGroup =
-        userGroupRatio != null &&
-        Number.isFinite(userGroupRatio) &&
-        userGroupRatio !== -1
-      const effectiveRatio = isUserGroup ? userGroupRatio : groupRatio
-      const ratioLabel = isUserGroup
-        ? t('User Exclusive Ratio')
-        : t('Group Ratio')
-
-      if (effectiveRatio != null && Number.isFinite(effectiveRatio)) {
-        segments.push({
-          text: `${ratioLabel} ${formatRatioCompact(effectiveRatio)}x`,
-        })
-      }
     }
   }
 
@@ -288,8 +256,25 @@ function buildTypeDetailSegments(
   return segments
 }
 
-export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
+export function useCommonLogsColumns(
+  isAdmin: boolean,
+  enabled = true
+): ColumnDef<UsageLog>[] {
   const { t } = useTranslation()
+  const accountsQuery = useQuery({
+    queryKey: upstreamBillingAccountsQueryKey,
+    queryFn: ({ signal }) => getUpstreamBillingAccounts(signal),
+    enabled: isAdmin && enabled,
+    retry: false,
+    staleTime: 60_000,
+  })
+  const upstreamAccountById = useMemo(
+    () =>
+      new Map(
+        (accountsQuery.data?.data ?? []).map((account) => [account.id, account])
+      ),
+    [accountsQuery.data?.data]
+  )
   const columns: ColumnDef<UsageLog>[] = [
     {
       accessorKey: 'created_at',
@@ -484,6 +469,42 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
         },
       },
       {
+        id: 'upstream_account',
+        header: t('Upstream Account'),
+        accessorFn: (row) => {
+          const other = parseLogOther(row.other)
+          return other?.admin_info?.upstream_billing?.credential_id ?? 0
+        },
+        cell: function UpstreamAccountCell({ row }) {
+          const { sensitiveVisible } = useUsageLogsContext()
+          const other = parseLogOther(row.original.other)
+          const billing = other?.admin_info?.upstream_billing
+          const credentialId = billing?.credential_id
+          if (!credentialId) {
+            return <span className='text-muted-foreground/40 text-xs'>-</span>
+          }
+
+          const account = upstreamAccountById.get(credentialId)
+          const accountName = account?.name || `#${credentialId}`
+          const provider = getUpstreamBillingProviderLabel(
+            account?.provider || billing.provider
+          )
+
+          return (
+            <div className='flex max-w-[160px] flex-col gap-0.5'>
+              <span className='truncate text-xs font-medium'>
+                {sensitiveVisible ? accountName : '••••'}
+              </span>
+              <span className='text-muted-foreground truncate font-mono text-[11px]'>
+                #{credentialId}
+                {provider ? ` · ${provider}` : ''}
+              </span>
+            </div>
+          )
+        },
+        size: 150,
+      },
+      {
         id: 'user',
         header: t('User'),
         accessorFn: (row) => row.username,
@@ -555,7 +576,6 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
       const displayName = sensitiveVisible ? tokenName : '••••'
       let group = log.group
       if (!group) group = other?.group || ''
-      const groupRatio = getGroupRatio(other)
 
       return (
         <div className='flex max-w-[200px] flex-col gap-0.5'>
@@ -578,23 +598,15 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
               )}
             </Tooltip>
           </TooltipProvider>
-          {(group || groupRatio != null) && (
+          {group && (
             <span className='block max-w-full truncate text-xs leading-none'>
-              {group ? (
-                <GroupBadge
-                  group={group}
-                  label={sensitiveVisible ? undefined : '••••'}
-                  type='text'
-                  size='sm'
-                  className='inline align-baseline text-xs leading-none [&>span]:leading-none'
-                />
-              ) : null}
-              {group && groupRatio != null ? ' ' : null}
-              {groupRatio != null ? (
-                <span className='text-muted-foreground/60 relative top-px align-baseline tabular-nums'>
-                  {formatRatioCompact(groupRatio)}x
-                </span>
-              ) : null}
+              <GroupBadge
+                group={group}
+                label={sensitiveVisible ? undefined : '••••'}
+                type='text'
+                size='sm'
+                className='inline align-baseline text-xs leading-none [&>span]:leading-none'
+              />
             </span>
           )}
         </div>
@@ -704,43 +716,104 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
         const quota = row.getValue('quota') as number
         const other = parseLogOther(log.other)
         const isSubscription = other?.billing_source === 'subscription'
+        const billingStatus = getUpstreamBillingStatusPresentation(
+          other?.upstream_billing_status
+        )
+        const adjustmentQuota =
+          other?.admin_info?.upstream_billing?.adjustment_quota ?? 0
+        const billingBreakdown = getAdminBillingBreakdown(other, isAdmin)
+        const quotaStr = formatLogQuota(quota)
+        const quotaDisplay = splitQuotaDisplay(quotaStr)
+        const quotaBadge = (
+          <span className='border-border/80 bg-muted/60 inline-flex h-6 w-fit items-center rounded-md border px-2 [font-family:var(--font-body)] text-sm leading-none font-semibold tabular-nums'>
+            {quotaDisplay.prefix && (
+              <span className='mr-1'>{quotaDisplay.prefix}</span>
+            )}
+            <span>{quotaDisplay.amount}</span>
+          </span>
+        )
+        const billingStatusBadge = billingStatus ? (
+          <StatusBadge
+            label={t(billingStatus.labelKey)}
+            variant={billingStatus.variant}
+            size='sm'
+            type='text'
+            showDot
+            copyable={false}
+            className='text-[11px]'
+          />
+        ) : null
+        const billingMeta =
+          billingStatusBadge || billingBreakdown ? (
+            <div className='flex items-center gap-1.5 whitespace-nowrap'>
+              {billingStatusBadge}
+              {billingBreakdown && (
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <span className='text-muted-foreground cursor-help font-mono text-[11px] tabular-nums'>
+                          {t('Upstream')}{' '}
+                          {formatLogQuota(billingBreakdown.upstreamCostQuota)} ×
+                          {billingBreakdown.groupRatio}
+                        </span>
+                      }
+                    />
+                    <TooltipContent>
+                      <div className='grid gap-1 text-xs'>
+                        <span>
+                          {t('Upstream actual cost')}:{' '}
+                          {formatLogQuota(
+                            billingBreakdown.upstreamCostQuota
+                          )}
+                        </span>
+                        <span>
+                          {t('Effective group ratio')}: ×
+                          {billingBreakdown.groupRatio}
+                        </span>
+                        <span>
+                          {t('Final user charge')}:{' '}
+                          {formatLogQuota(billingBreakdown.chargedQuota)}
+                        </span>
+                      </div>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
+            </div>
+          ) : null
 
         if (isSubscription) {
           return (
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <StatusBadge
-                      label={t('Subscription')}
-                      variant='success'
-                      size='sm'
-                      copyable={false}
-                      className='cursor-help'
-                    />
-                  }
-                />
-                <TooltipContent>
-                  <span>
-                    {t('Deducted by subscription')}: {formatLogQuota(quota)}
-                  </span>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
+            <div className='flex flex-col items-start gap-0.5'>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={<span className='cursor-help'>{quotaBadge}</span>}
+                  />
+                  <TooltipContent>
+                    <span>{t('Deducted by subscription')}</span>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+              {billingMeta}
+            </div>
           )
         }
 
-        const quotaStr = formatLogQuota(quota)
-        const quotaDisplay = splitQuotaDisplay(quotaStr)
-
         return (
-          <div className='flex flex-col gap-0.5'>
-            <span className='border-border/80 bg-muted/60 inline-flex h-6 w-fit items-center rounded-md border px-2 [font-family:var(--font-body)] text-sm leading-none font-semibold tabular-nums'>
-              {quotaDisplay.prefix && (
-                <span className='mr-1'>{quotaDisplay.prefix}</span>
-              )}
-              <span>{quotaDisplay.amount}</span>
-            </span>
+          <div className='flex flex-col items-start gap-0.5'>
+            {quotaBadge}
+            {billingMeta}
+            {adjustmentQuota !== 0 && (
+              <span
+                className='text-muted-foreground font-mono text-[11px] tabular-nums'
+                title={t('Adjustment')}
+              >
+                Δ {adjustmentQuota > 0 ? '+' : '-'}
+                {formatLogQuota(Math.abs(adjustmentQuota))}
+              </span>
+            )}
           </div>
         )
       },
@@ -774,6 +847,10 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
         const [dialogOpen, setDialogOpen] = useState(false)
         const log = row.original
         const other = parseLogOther(log.other)
+        const billing = other?.admin_info?.upstream_billing
+        const upstreamAccount = billing?.credential_id
+          ? upstreamAccountById.get(billing.credential_id)
+          : undefined
 
         const segments = buildDetailSegments(log, other, t, isAdmin)
         const primary = segments[0]
@@ -822,6 +899,8 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
             <DetailsDialog
               log={log}
               isAdmin={isAdmin}
+              upstreamAccountName={upstreamAccount?.name}
+              upstreamAccountProvider={upstreamAccount?.provider}
               open={dialogOpen}
               onOpenChange={setDialogOpen}
             />
