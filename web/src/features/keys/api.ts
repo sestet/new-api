@@ -99,6 +99,13 @@ export async function updateApiKeyStatus(
   return res.data
 }
 
+export async function resetApiKeyRateLimitUsage(
+  id: number
+): Promise<ApiResponse<ApiKey>> {
+  const res = await api.post(`/api/token/${id}/reset-rate-limit`)
+  return res.data
+}
+
 // Fetch the real (unmasked) key for a token by ID
 export async function fetchTokenKey(
   id: number

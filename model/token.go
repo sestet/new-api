@@ -26,9 +26,70 @@ type Token struct {
 	ModelLimits        string         `json:"model_limits" gorm:"type:text"`
 	AllowIps           *string        `json:"allow_ips" gorm:"default:''"`
 	UsedQuota          int64          `json:"used_quota" gorm:"type:bigint;default:0"` // used quota
+	RateLimit5h        int64          `json:"rate_limit_5h" gorm:"column:rate_limit_5h;type:bigint;default:0"`
+	RateLimit1d        int64          `json:"rate_limit_1d" gorm:"column:rate_limit_1d;type:bigint;default:0"`
+	RateLimit7d        int64          `json:"rate_limit_7d" gorm:"column:rate_limit_7d;type:bigint;default:0"`
+	Usage5h            int64          `json:"usage_5h" gorm:"column:usage_5h;type:bigint;default:0"`
+	Usage1d            int64          `json:"usage_1d" gorm:"column:usage_1d;type:bigint;default:0"`
+	Usage7d            int64          `json:"usage_7d" gorm:"column:usage_7d;type:bigint;default:0"`
+	Window5hStart      int64          `json:"window_5h_start" gorm:"column:window_5h_start;type:bigint;default:0"`
+	Window1dStart      int64          `json:"window_1d_start" gorm:"column:window_1d_start;type:bigint;default:0"`
+	Window7dStart      int64          `json:"window_7d_start" gorm:"column:window_7d_start;type:bigint;default:0"`
+	Reset5hAt          int64          `json:"reset_5h_at" gorm:"-"`
+	Reset1dAt          int64          `json:"reset_1d_at" gorm:"-"`
+	Reset7dAt          int64          `json:"reset_7d_at" gorm:"-"`
 	Group              string         `json:"group" gorm:"default:''"`
 	CrossGroupRetry    bool           `json:"cross_group_retry"` // 跨分组重试，仅auto分组有效
 	DeletedAt          gorm.DeletedAt `gorm:"index"`
+}
+
+const (
+	TokenRateLimitWindow5h = "5h"
+	TokenRateLimitWindow1d = "1d"
+	TokenRateLimitWindow7d = "7d"
+
+	tokenRateLimitDuration5h = int64(5 * 60 * 60)
+	tokenRateLimitDuration1d = int64(24 * 60 * 60)
+	tokenRateLimitDuration7d = int64(7 * 24 * 60 * 60)
+)
+
+type TokenRateLimitError struct {
+	Window    string
+	Limit     int64
+	Used      int64
+	Requested int64
+	ResetAt   int64
+}
+
+func (e *TokenRateLimitError) Error() string {
+	if e == nil {
+		return ""
+	}
+	return fmt.Sprintf("API key %s quota exceeded: used=%d, requested=%d, limit=%d, resets_at=%d",
+		e.Window, e.Used, e.Requested, e.Limit, e.ResetAt)
+}
+
+func (token *Token) HasRateLimits() bool {
+	return token != nil && (token.RateLimit5h > 0 || token.RateLimit1d > 0 || token.RateLimit7d > 0)
+}
+
+func (token *Token) PrepareRateLimitView(now int64) {
+	if token == nil {
+		return
+	}
+	prepareTokenRateLimitWindowView(&token.Usage5h, &token.Window5hStart, &token.Reset5hAt, token.RateLimit5h, tokenRateLimitDuration5h, now)
+	prepareTokenRateLimitWindowView(&token.Usage1d, &token.Window1dStart, &token.Reset1dAt, token.RateLimit1d, tokenRateLimitDuration1d, now)
+	prepareTokenRateLimitWindowView(&token.Usage7d, &token.Window7dStart, &token.Reset7dAt, token.RateLimit7d, tokenRateLimitDuration7d, now)
+}
+
+func prepareTokenRateLimitWindowView(usage *int64, start *int64, resetAt *int64, limit int64, duration int64, now int64) {
+	if limit <= 0 || *start <= 0 || now >= *start+duration {
+		*usage = 0
+		*start = 0
+		*resetAt = 0
+		return
+	}
+	*resetAt = *start + duration
 }
 
 func (token *Token) Clean() {
@@ -302,7 +363,9 @@ func (token *Token) Update() (err error) {
 		}
 	}()
 	err = DB.Model(token).Select("name", "status", "expired_time", "remain_quota", "unlimited_quota",
-		"model_limits_enabled", "model_limits", "allow_ips", "group", "cross_group_retry").Updates(token).Error
+		"model_limits_enabled", "model_limits", "allow_ips", "group", "cross_group_retry",
+		"rate_limit_5h", "rate_limit_1d", "rate_limit_7d", "usage_5h", "usage_1d", "usage_7d",
+		"window_5h_start", "window_1d_start", "window_7d_start").Updates(token).Error
 	return err
 }
 
@@ -437,6 +500,199 @@ func decreaseTokenQuota(id int, quota int64) (err error) {
 		},
 	).Error
 	return err
+}
+
+func DecreaseTokenQuotaWithRateLimit(id int, key string, quota int64, occurredAt int64, enforce bool) error {
+	if quota < 0 {
+		return errors.New("quota 不能为负数！")
+	}
+	if quota == 0 {
+		return nil
+	}
+	if occurredAt <= 0 {
+		occurredAt = common.GetTimestamp()
+	}
+
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var token Token
+		if err := lockForUpdate(tx).Where("id = ?", id).First(&token).Error; err != nil {
+			return err
+		}
+		if enforce && !token.UnlimitedQuota && token.RemainQuota < quota {
+			return fmt.Errorf("token quota is not enough, token remain quota: %d, need quota: %d", token.RemainQuota, quota)
+		}
+		if err := applyTokenRateLimitDelta(&token, quota, occurredAt, enforce); err != nil {
+			return err
+		}
+		if token.RemainQuota < common.MinQuota+quota || token.UsedQuota > common.MaxQuota-quota {
+			return errors.New("token quota adjustment exceeds the supported range")
+		}
+		token.RemainQuota -= quota
+		token.UsedQuota += quota
+		token.AccessedTime = common.GetTimestamp()
+		return tx.Model(&Token{}).Where("id = ?", token.Id).Updates(map[string]interface{}{
+			"remain_quota":    token.RemainQuota,
+			"used_quota":      token.UsedQuota,
+			"accessed_time":   token.AccessedTime,
+			"usage_5h":        token.Usage5h,
+			"usage_1d":        token.Usage1d,
+			"usage_7d":        token.Usage7d,
+			"window_5h_start": token.Window5hStart,
+			"window_1d_start": token.Window1dStart,
+			"window_7d_start": token.Window7dStart,
+		}).Error
+	})
+	if err == nil && common.RedisEnabled && key != "" {
+		_ = cacheDeleteToken(key)
+	}
+	return err
+}
+
+func IncreaseTokenQuotaWithRateLimit(id int, key string, quota int64, occurredAt int64) error {
+	if quota < 0 {
+		return errors.New("quota 不能为负数！")
+	}
+	if quota == 0 {
+		return nil
+	}
+	if occurredAt <= 0 {
+		occurredAt = common.GetTimestamp()
+	}
+
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var token Token
+		if err := lockForUpdate(tx).Where("id = ?", id).First(&token).Error; err != nil {
+			return err
+		}
+		if err := applyTokenRateLimitDelta(&token, -quota, occurredAt, false); err != nil {
+			return err
+		}
+		if token.RemainQuota > common.MaxQuota-quota {
+			return errors.New("token quota adjustment exceeds the supported range")
+		}
+		token.RemainQuota += quota
+		if quota >= token.UsedQuota {
+			token.UsedQuota = 0
+		} else {
+			token.UsedQuota -= quota
+		}
+		token.AccessedTime = common.GetTimestamp()
+		return tx.Model(&Token{}).Where("id = ?", token.Id).Updates(map[string]interface{}{
+			"remain_quota":    token.RemainQuota,
+			"used_quota":      token.UsedQuota,
+			"accessed_time":   token.AccessedTime,
+			"usage_5h":        token.Usage5h,
+			"usage_1d":        token.Usage1d,
+			"usage_7d":        token.Usage7d,
+			"window_5h_start": token.Window5hStart,
+			"window_1d_start": token.Window1dStart,
+			"window_7d_start": token.Window7dStart,
+		}).Error
+	})
+	if err == nil && common.RedisEnabled && key != "" {
+		_ = cacheDeleteToken(key)
+	}
+	return err
+}
+
+func applyTokenRateLimitDelta(token *Token, delta int64, occurredAt int64, enforce bool) error {
+	if token == nil || delta == 0 {
+		return nil
+	}
+	windows := []struct {
+		name     string
+		limit    int64
+		usage    *int64
+		start    *int64
+		duration int64
+	}{
+		{name: TokenRateLimitWindow5h, limit: token.RateLimit5h, usage: &token.Usage5h, start: &token.Window5hStart, duration: tokenRateLimitDuration5h},
+		{name: TokenRateLimitWindow1d, limit: token.RateLimit1d, usage: &token.Usage1d, start: &token.Window1dStart, duration: tokenRateLimitDuration1d},
+		{name: TokenRateLimitWindow7d, limit: token.RateLimit7d, usage: &token.Usage7d, start: &token.Window7dStart, duration: tokenRateLimitDuration7d},
+	}
+
+	for _, window := range windows {
+		if window.limit <= 0 {
+			continue
+		}
+		if *window.start <= 0 || occurredAt >= *window.start+window.duration {
+			if delta < 0 {
+				continue
+			}
+			*window.start = occurredAt
+			*window.usage = 0
+		}
+		if occurredAt < *window.start {
+			continue
+		}
+		if delta < 0 {
+			refund := -delta
+			if refund >= *window.usage {
+				*window.usage = 0
+			} else {
+				*window.usage -= refund
+			}
+			continue
+		}
+		if *window.usage > common.MaxQuota-delta {
+			return errors.New("token rate limit usage exceeds the supported range")
+		}
+		nextUsage := *window.usage + delta
+		if enforce && nextUsage > window.limit {
+			return &TokenRateLimitError{
+				Window:    window.name,
+				Limit:     window.limit,
+				Used:      *window.usage,
+				Requested: delta,
+				ResetAt:   *window.start + window.duration,
+			}
+		}
+		*window.usage = nextUsage
+	}
+	return nil
+}
+
+func ResetTokenRateLimitUsage(id int, userId int) (*Token, error) {
+	var token Token
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		if err := lockForUpdate(tx).Where("id = ? AND user_id = ?", id, userId).First(&token).Error; err != nil {
+			return err
+		}
+		now := common.GetTimestamp()
+		window5hStart := int64(0)
+		window1dStart := int64(0)
+		window7dStart := int64(0)
+		if token.RateLimit5h > 0 {
+			window5hStart = now
+		}
+		if token.RateLimit1d > 0 {
+			window1dStart = now
+		}
+		if token.RateLimit7d > 0 {
+			window7dStart = now
+		}
+		if err := tx.Model(&Token{}).Where("id = ?", token.Id).Updates(map[string]interface{}{
+			"usage_5h":        0,
+			"usage_1d":        0,
+			"usage_7d":        0,
+			"window_5h_start": window5hStart,
+			"window_1d_start": window1dStart,
+			"window_7d_start": window7dStart,
+		}).Error; err != nil {
+			return err
+		}
+		token.Usage5h = 0
+		token.Usage1d = 0
+		token.Usage7d = 0
+		token.Window5hStart = window5hStart
+		token.Window1dStart = window1dStart
+		token.Window7dStart = window7dStart
+		return nil
+	})
+	if err == nil && common.RedisEnabled && token.Key != "" {
+		_ = cacheDeleteToken(token.Key)
+	}
+	return &token, err
 }
 
 // CountUserTokens returns total number of tokens for the given user, used for pagination

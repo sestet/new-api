@@ -81,6 +81,7 @@ import {
   ApiKeyGroupCombobox,
   type ApiKeyGroupOption,
 } from './api-key-group-combobox'
+import { ApiKeyRateLimitFields } from './api-key-rate-limit-fields'
 import { useApiKeys } from './api-keys-provider'
 
 type ApiKeyMutateDrawerProps = {
@@ -497,6 +498,13 @@ export function ApiKeysMutateDrawer({
                     </FormControl>
                   </FormItem>
                 )}
+              />
+
+              <ApiKeyRateLimitFields
+                form={form}
+                apiKeyId={currentRow?.id}
+                currencyLabel={currencyLabel}
+                tokensOnly={tokensOnly}
               />
             </SideDrawerSection>
 

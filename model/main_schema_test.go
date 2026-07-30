@@ -55,6 +55,8 @@ func TestInitializeDBSchemaCreatesCurrentBaseline(t *testing.T) {
 	}
 	assert.True(t, db.Migrator().HasColumn(&User{}, "auth_version"))
 	assert.True(t, db.Migrator().HasColumn(&Token{}, "model_limits"))
+	assert.True(t, db.Migrator().HasColumn(&Token{}, "rate_limit_5h"))
+	assert.True(t, db.Migrator().HasColumn(&Token{}, "usage_1d"))
 	assert.True(t, db.Migrator().HasColumn(&SubscriptionPlan{}, "price_amount"))
 	assert.True(t, db.Migrator().HasColumn(&UpstreamBillingRecord{}, "request_finished_at_ms"))
 

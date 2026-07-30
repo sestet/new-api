@@ -20,7 +20,21 @@ func buildMaskedTokenResponse(token *model.Token) *model.Token {
 	}
 	maskedToken := *token
 	maskedToken.Key = token.GetMaskedKey()
+	maskedToken.PrepareRateLimitView(common.GetTimestamp())
 	return &maskedToken
+}
+
+func validateTokenRateLimits(token *model.Token) error {
+	limits := []int64{token.RateLimit5h, token.RateLimit1d, token.RateLimit7d}
+	for _, limit := range limits {
+		if limit < 0 {
+			return fmt.Errorf("API Key 时间限额不能为负数")
+		}
+		if limit > common.MaxQuota {
+			return fmt.Errorf("API Key 时间限额不能超过 %d", common.MaxQuota)
+		}
+	}
+	return nil
 }
 
 func buildMaskedTokenResponses(tokens []*model.Token) []*model.Token {
@@ -175,6 +189,10 @@ func AddToken(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgTokenNameTooLong)
 		return
 	}
+	if err := validateTokenRateLimits(&token); err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	// 非无限额度时，检查额度值是否超出有效范围
 	if !token.UnlimitedQuota {
 		if token.RemainQuota < 0 {
@@ -221,6 +239,9 @@ func AddToken(c *gin.Context) {
 		AllowIps:           token.AllowIps,
 		Group:              token.Group,
 		CrossGroupRetry:    token.CrossGroupRetry,
+		RateLimit5h:        token.RateLimit5h,
+		RateLimit1d:        token.RateLimit1d,
+		RateLimit7d:        token.RateLimit7d,
 	}
 	err = cleanToken.Insert()
 	if err != nil {
@@ -258,6 +279,10 @@ func UpdateToken(c *gin.Context) {
 	}
 	if len(token.Name) > 50 {
 		common.ApiErrorI18n(c, i18n.MsgTokenNameTooLong)
+		return
+	}
+	if err := validateTokenRateLimits(&token); err != nil {
+		common.ApiError(c, err)
 		return
 	}
 	if !token.UnlimitedQuota {
@@ -299,6 +324,34 @@ func UpdateToken(c *gin.Context) {
 		cleanToken.AllowIps = token.AllowIps
 		cleanToken.Group = token.Group
 		cleanToken.CrossGroupRetry = token.CrossGroupRetry
+		previousRateLimit5h := cleanToken.RateLimit5h
+		previousRateLimit1d := cleanToken.RateLimit1d
+		previousRateLimit7d := cleanToken.RateLimit7d
+		cleanToken.RateLimit5h = token.RateLimit5h
+		cleanToken.RateLimit1d = token.RateLimit1d
+		cleanToken.RateLimit7d = token.RateLimit7d
+		now := common.GetTimestamp()
+		if cleanToken.RateLimit5h == 0 {
+			cleanToken.Usage5h = 0
+			cleanToken.Window5hStart = 0
+		} else if previousRateLimit5h == 0 {
+			cleanToken.Usage5h = 0
+			cleanToken.Window5hStart = now
+		}
+		if cleanToken.RateLimit1d == 0 {
+			cleanToken.Usage1d = 0
+			cleanToken.Window1dStart = 0
+		} else if previousRateLimit1d == 0 {
+			cleanToken.Usage1d = 0
+			cleanToken.Window1dStart = now
+		}
+		if cleanToken.RateLimit7d == 0 {
+			cleanToken.Usage7d = 0
+			cleanToken.Window7dStart = 0
+		} else if previousRateLimit7d == 0 {
+			cleanToken.Usage7d = 0
+			cleanToken.Window7dStart = now
+		}
 	}
 	err = cleanToken.Update()
 	if err != nil {
@@ -310,6 +363,20 @@ func UpdateToken(c *gin.Context) {
 		"message": "",
 		"data":    buildMaskedTokenResponse(cleanToken),
 	})
+}
+
+func ResetTokenRateLimitUsage(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	token, err := model.ResetTokenRateLimitUsage(id, c.GetInt("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, buildMaskedTokenResponse(token))
 }
 
 type TokenBatch struct {

@@ -29,6 +29,18 @@ export const apiKeySchema = z.object({
   status: z.number(), // 1: enabled, 2: disabled, 3: expired, 4: exhausted
   remain_quota: z.number(),
   used_quota: z.number(),
+  rate_limit_5h: z.number(),
+  rate_limit_1d: z.number(),
+  rate_limit_7d: z.number(),
+  usage_5h: z.number(),
+  usage_1d: z.number(),
+  usage_7d: z.number(),
+  window_5h_start: z.number(),
+  window_1d_start: z.number(),
+  window_7d_start: z.number(),
+  reset_5h_at: z.number(),
+  reset_1d_at: z.number(),
+  reset_7d_at: z.number(),
   unlimited_quota: z.boolean(),
   expired_time: z.number(), // -1 for never expires
   created_time: z.number(),
@@ -92,6 +104,9 @@ export interface ApiKeyFormData {
   allow_ips: string
   group: string
   cross_group_retry: boolean
+  rate_limit_5h: number
+  rate_limit_1d: number
+  rate_limit_7d: number
 }
 
 // ============================================================================

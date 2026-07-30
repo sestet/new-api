@@ -60,10 +60,19 @@ func (s *BillingSession) Settle(actualQuota int64) error {
 	// 2) 调整令牌额度
 	var tokenErr error
 	if !s.relayInfo.IsPlayground {
+		occurredAt := s.relayInfo.StartTime.Unix()
 		if delta > 0 {
-			tokenErr = model.DecreaseTokenQuota(s.relayInfo.TokenId, s.relayInfo.TokenKey, delta)
+			if s.relayInfo.TokenRateLimited {
+				tokenErr = model.DecreaseTokenQuotaWithRateLimit(s.relayInfo.TokenId, s.relayInfo.TokenKey, delta, occurredAt, false)
+			} else {
+				tokenErr = model.DecreaseTokenQuota(s.relayInfo.TokenId, s.relayInfo.TokenKey, delta)
+			}
 		} else {
-			tokenErr = model.IncreaseTokenQuota(s.relayInfo.TokenId, s.relayInfo.TokenKey, -delta)
+			if s.relayInfo.TokenRateLimited {
+				tokenErr = model.IncreaseTokenQuotaWithRateLimit(s.relayInfo.TokenId, s.relayInfo.TokenKey, -delta, occurredAt)
+			} else {
+				tokenErr = model.IncreaseTokenQuota(s.relayInfo.TokenId, s.relayInfo.TokenKey, -delta)
+			}
 		}
 		if tokenErr != nil {
 			// 资金来源已提交，令牌调整失败只能记录日志；标记 settled 防止 Refund 误退资金
@@ -101,6 +110,8 @@ func (s *BillingSession) Refund(c *gin.Context) {
 	tokenKey := s.relayInfo.TokenKey
 	isPlayground := s.relayInfo.IsPlayground
 	tokenConsumed := s.tokenConsumed
+	tokenRateLimited := s.relayInfo.TokenRateLimited
+	occurredAt := s.relayInfo.StartTime.Unix()
 	extraReserved := s.extraReserved
 	subscriptionId := s.relayInfo.SubscriptionId
 	funding := s.funding
@@ -117,7 +128,13 @@ func (s *BillingSession) Refund(c *gin.Context) {
 		}
 		// 2) 退还令牌额度
 		if tokenConsumed > 0 && !isPlayground {
-			if err := model.IncreaseTokenQuota(tokenId, tokenKey, tokenConsumed); err != nil {
+			var err error
+			if tokenRateLimited {
+				err = model.IncreaseTokenQuotaWithRateLimit(tokenId, tokenKey, tokenConsumed, occurredAt)
+			} else {
+				err = model.IncreaseTokenQuota(tokenId, tokenKey, tokenConsumed)
+			}
+			if err != nil {
 				common.SysLog("error refunding token quota: " + err.Error())
 			}
 		}
@@ -200,7 +217,7 @@ func (s *BillingSession) preConsume(c *gin.Context, quota int64) *types.NewAPIEr
 	// ---- 1) 预扣令牌额度 ----
 	if effectiveQuota > 0 {
 		if err := PreConsumeTokenQuota(s.relayInfo, effectiveQuota); err != nil {
-			return types.NewErrorWithStatusCode(err, types.ErrorCodePreConsumeTokenQuotaFailed, http.StatusForbidden, types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog())
+			return newTokenQuotaAPIError(err)
 		}
 		s.tokenConsumed = effectiveQuota
 	}
@@ -209,7 +226,13 @@ func (s *BillingSession) preConsume(c *gin.Context, quota int64) *types.NewAPIEr
 	if err := s.funding.PreConsume(effectiveQuota); err != nil {
 		// 预扣费失败，回滚令牌额度
 		if s.tokenConsumed > 0 && !s.relayInfo.IsPlayground {
-			if rollbackErr := model.IncreaseTokenQuota(s.relayInfo.TokenId, s.relayInfo.TokenKey, s.tokenConsumed); rollbackErr != nil {
+			var rollbackErr error
+			if s.relayInfo.TokenRateLimited {
+				rollbackErr = model.IncreaseTokenQuotaWithRateLimit(s.relayInfo.TokenId, s.relayInfo.TokenKey, s.tokenConsumed, s.relayInfo.StartTime.Unix())
+			} else {
+				rollbackErr = model.IncreaseTokenQuota(s.relayInfo.TokenId, s.relayInfo.TokenKey, s.tokenConsumed)
+			}
+			if rollbackErr != nil {
 				common.SysLog(fmt.Sprintf("error rolling back token quota (userId=%d, tokenId=%d, amount=%d, fundingErr=%s): %s",
 					s.relayInfo.UserId, s.relayInfo.TokenId, s.tokenConsumed, err.Error(), rollbackErr.Error()))
 			}
@@ -288,7 +311,7 @@ func (s *BillingSession) reserveToken(delta int64) error {
 		return nil
 	}
 	if err := PreConsumeTokenQuota(s.relayInfo, delta); err != nil {
-		return types.NewErrorWithStatusCode(err, types.ErrorCodePreConsumeTokenQuotaFailed, http.StatusForbidden, types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog())
+		return newTokenQuotaAPIError(err)
 	}
 	return nil
 }
@@ -297,6 +320,9 @@ func (s *BillingSession) reserveToken(delta int64) error {
 func (s *BillingSession) shouldTrust(c *gin.Context) bool {
 	// 异步任务（ForcePreConsume=true）必须预扣全额，不允许信任旁路
 	if s.relayInfo.ForcePreConsume {
+		return false
+	}
+	if s.relayInfo.TokenRateLimited {
 		return false
 	}
 
@@ -327,6 +353,16 @@ func (s *BillingSession) shouldTrust(c *gin.Context) bool {
 	default:
 		return false
 	}
+}
+
+func newTokenQuotaAPIError(err error) *types.NewAPIError {
+	statusCode := http.StatusForbidden
+	var rateLimitErr *model.TokenRateLimitError
+	if errors.As(err, &rateLimitErr) {
+		statusCode = http.StatusTooManyRequests
+	}
+	return types.NewErrorWithStatusCode(err, types.ErrorCodePreConsumeTokenQuotaFailed, statusCode,
+		types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog())
 }
 
 // syncRelayInfo 将 BillingSession 的状态同步到 RelayInfo 的兼容字段上。

@@ -66,17 +66,6 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 // 异步任务计费辅助函数
 // ---------------------------------------------------------------------------
 
-// resolveTokenKey 通过 TokenId 运行时获取令牌 Key（用于 Redis 缓存操作）。
-// 如果令牌已被删除或查询失败，返回空字符串。
-func resolveTokenKey(ctx context.Context, tokenId int, taskID string) string {
-	token, err := model.GetTokenById(tokenId)
-	if err != nil {
-		logger.LogWarn(ctx, fmt.Sprintf("获取令牌 key 失败 (tokenId=%d, task=%s): %s", tokenId, taskID, err.Error()))
-		return ""
-	}
-	return token.Key
-}
-
 // taskIsSubscription 判断任务是否通过订阅计费。
 func taskIsSubscription(task *model.Task) bool {
 	return task.PrivateData.BillingSource == BillingSourceSubscription && task.PrivateData.SubscriptionId > 0
@@ -94,20 +83,30 @@ func taskAdjustFunding(task *model.Task, delta int64) error {
 }
 
 // taskAdjustTokenQuota 调整任务的令牌额度，delta > 0 表示扣费，delta < 0 表示退还。
-// 需要通过 resolveTokenKey 运行时获取 key（不从 PrivateData 中读取）。
+// 运行时读取令牌，以便使用当前时间限额配置并更新 Redis 缓存。
 func taskAdjustTokenQuota(ctx context.Context, task *model.Task, delta int64) {
 	if task.PrivateData.TokenId <= 0 || delta == 0 {
 		return
 	}
-	tokenKey := resolveTokenKey(ctx, task.PrivateData.TokenId, task.TaskID)
-	if tokenKey == "" {
+	token, err := model.GetTokenById(task.PrivateData.TokenId)
+	if err != nil {
+		logger.LogWarn(ctx, fmt.Sprintf("获取令牌失败 (tokenId=%d, task=%s): %s", task.PrivateData.TokenId, task.TaskID, err.Error()))
 		return
 	}
-	var err error
+	tokenKey := token.Key
+	occurredAt := task.CreatedAt
 	if delta > 0 {
-		err = model.DecreaseTokenQuota(task.PrivateData.TokenId, tokenKey, delta)
+		if token.HasRateLimits() {
+			err = model.DecreaseTokenQuotaWithRateLimit(task.PrivateData.TokenId, tokenKey, delta, occurredAt, false)
+		} else {
+			err = model.DecreaseTokenQuota(task.PrivateData.TokenId, tokenKey, delta)
+		}
 	} else {
-		err = model.IncreaseTokenQuota(task.PrivateData.TokenId, tokenKey, -delta)
+		if token.HasRateLimits() {
+			err = model.IncreaseTokenQuotaWithRateLimit(task.PrivateData.TokenId, tokenKey, -delta, occurredAt)
+		} else {
+			err = model.IncreaseTokenQuota(task.PrivateData.TokenId, tokenKey, -delta)
+		}
 	}
 	if err != nil {
 		logger.LogWarn(ctx, fmt.Sprintf("调整令牌额度失败 (delta=%d, task=%s): %s", delta, task.TaskID, err.Error()))

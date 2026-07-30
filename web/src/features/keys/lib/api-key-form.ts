@@ -22,7 +22,7 @@ import { z } from 'zod'
 import { parseQuotaFromDollars, quotaUnitsToDollars } from '@/lib/format'
 
 import { DEFAULT_GROUP } from '../constants'
-import { type ApiKeyFormData, type ApiKey } from '../types'
+import type { ApiKey, ApiKeyFormData } from '../types'
 
 // ============================================================================
 // Form Schema
@@ -33,6 +33,9 @@ export function getApiKeyFormSchema(t: TFunction) {
     .object({
       name: z.string().min(1, t('Please enter a name')),
       remain_quota_dollars: z.number().optional(),
+      rate_limit_5h_dollars: z.number().min(0),
+      rate_limit_1d_dollars: z.number().min(0),
+      rate_limit_7d_dollars: z.number().min(0),
       expired_time: z.date().optional(),
       unlimited_quota: z.boolean(),
       model_limits: z.array(z.string()),
@@ -68,6 +71,9 @@ export type ApiKeyFormValues = z.infer<ReturnType<typeof getApiKeyFormSchema>>
 export const API_KEY_FORM_DEFAULT_VALUES: ApiKeyFormValues = {
   name: '',
   remain_quota_dollars: 10,
+  rate_limit_5h_dollars: 0,
+  rate_limit_1d_dollars: 0,
+  rate_limit_7d_dollars: 0,
   expired_time: undefined,
   unlimited_quota: true,
   model_limits: [],
@@ -111,6 +117,9 @@ export function transformFormDataToPayload(
     allow_ips: data.allow_ips || '',
     group: data.group || '',
     cross_group_retry: data.group === 'auto' ? !!data.cross_group_retry : false,
+    rate_limit_5h: parseQuotaFromDollars(data.rate_limit_5h_dollars),
+    rate_limit_1d: parseQuotaFromDollars(data.rate_limit_1d_dollars),
+    rate_limit_7d: parseQuotaFromDollars(data.rate_limit_7d_dollars),
   }
 }
 
@@ -136,6 +145,9 @@ export function transformApiKeyToFormDefaults(
     allow_ips: apiKey.allow_ips || '',
     group: apiKey.group || DEFAULT_GROUP,
     cross_group_retry: !!apiKey.cross_group_retry,
+    rate_limit_5h_dollars: quotaUnitsToDollars(apiKey.rate_limit_5h),
+    rate_limit_1d_dollars: quotaUnitsToDollars(apiKey.rate_limit_1d),
+    rate_limit_7d_dollars: quotaUnitsToDollars(apiKey.rate_limit_7d),
     tokenCount: 1,
   }
 }

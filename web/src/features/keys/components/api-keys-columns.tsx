@@ -36,6 +36,7 @@ import { cn } from '@/lib/utils'
 
 import { API_KEY_STATUSES } from '../constants'
 import type { ApiKey } from '../types'
+import { ApiKeyRateLimitsCell } from './api-key-rate-limits-cell'
 import { ApiKeyTimestampCell } from './api-key-timestamp-cell'
 import {
   ApiKeyCell,
@@ -175,6 +176,15 @@ export function useApiKeysColumns(now: number): ColumnDef<ApiKey>[] {
         )
       },
       size: 230,
+    },
+    {
+      id: 'time_limits',
+      header: t('Time-based limits'),
+      cell: ({ row }) => (
+        <ApiKeyRateLimitsCell apiKey={row.original} now={now} locale={locale} />
+      ),
+      enableSorting: false,
+      size: 240,
     },
     {
       accessorKey: 'group',

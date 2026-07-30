@@ -1,3 +1,3 @@
-export function readRuntimeEnv(value: string | undefined): string {
+export function readRuntimeEnv(value: unknown): string {
   return String.prototype.trim.call(value ?? '')
 }

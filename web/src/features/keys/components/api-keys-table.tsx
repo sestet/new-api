@@ -53,6 +53,7 @@ import {
   ERROR_MESSAGES,
 } from '../constants'
 import type { ApiKey } from '../types'
+import { ApiKeyRateLimitsCell } from './api-key-rate-limits-cell'
 import { ApiKeyCell, UnlimitedQuotaBadge } from './api-keys-cells'
 import { useApiKeysColumns } from './api-keys-columns'
 import { useApiKeys } from './api-keys-provider'
@@ -96,9 +97,11 @@ function ApiKeysMobileSkeleton() {
 function ApiKeysMobileList({
   table,
   isLoading,
+  now,
 }: {
   table: TanstackTable<ApiKey>
   isLoading: boolean
+  now: number
 }) {
   const { t } = useTranslation()
   const rows = table.getRowModel().rows
@@ -178,6 +181,13 @@ function ApiKeysMobileList({
                   </span>
                 </span>
               )}
+            </div>
+
+            <div className='space-y-1.5 border-t pt-2'>
+              <span className='text-muted-foreground text-xs'>
+                {t('Time-based limits')}
+              </span>
+              <ApiKeyRateLimitsCell apiKey={apiKey} now={now} compact />
             </div>
           </div>
         )
@@ -325,7 +335,9 @@ export function ApiKeysTable() {
           },
         ],
       }}
-      mobile={<ApiKeysMobileList table={table} isLoading={isLoading} />}
+      mobile={
+        <ApiKeysMobileList table={table} isLoading={isLoading} now={now} />
+      }
       getRowClassName={(row) =>
         isDisabledApiKeyRow(row.original) ? DISABLED_ROW_DESKTOP : undefined
       }

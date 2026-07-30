@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"net/http"
 	"testing"
 
@@ -10,6 +11,22 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestNewTokenQuotaAPIErrorUsesTooManyRequestsForTimeWindowLimit(t *testing.T) {
+	rateLimitErr := &model.TokenRateLimitError{Window: model.TokenRateLimitWindow5h, Limit: 100, Used: 90, Requested: 20, ResetAt: 2000}
+
+	apiErr := newTokenQuotaAPIError(rateLimitErr)
+
+	assert.Equal(t, http.StatusTooManyRequests, apiErr.StatusCode)
+	assert.Equal(t, types.ErrorCodePreConsumeTokenQuotaFailed, apiErr.GetErrorCode())
+	assert.True(t, errors.Is(apiErr, rateLimitErr))
+}
+
+func TestNewTokenQuotaAPIErrorKeepsLifetimeQuotaFailureForbidden(t *testing.T) {
+	apiErr := newTokenQuotaAPIError(errors.New("token quota is not enough"))
+
+	assert.Equal(t, http.StatusForbidden, apiErr.StatusCode)
+}
 
 func TestBillingSessionReserveRejectsInsufficientWalletQuota(t *testing.T) {
 	truncate(t)

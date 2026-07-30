@@ -342,10 +342,31 @@ func ApplyUpstreamBillingAdjustment(input UpstreamBillingAdjustmentInput) (Upstr
 				return err
 			}
 			tokenKey = token.Key
+			if token.HasRateLimits() {
+				occurredAt := record.RequestStartedAtMs / 1000
+				if err := applyTokenRateLimitDelta(&token, delta, occurredAt, false); err != nil {
+					return err
+				}
+			}
+			if token.RemainQuota < common.MinQuota+delta || token.RemainQuota > common.MaxQuota+delta ||
+				token.UsedQuota > common.MaxQuota-delta || token.UsedQuota < common.MinQuota-delta {
+				return errors.New("token quota adjustment exceeds the supported range")
+			}
+			newRemainQuota := token.RemainQuota - delta
+			newUsedQuota := token.UsedQuota + delta
+			if newUsedQuota < 0 {
+				newUsedQuota = 0
+			}
 			if err := tx.Model(&Token{}).Where("id = ?", token.Id).Updates(map[string]interface{}{
-				"remain_quota":  gorm.Expr("remain_quota - ?", delta),
-				"used_quota":    gorm.Expr("used_quota + ?", delta),
-				"accessed_time": common.GetTimestamp(),
+				"remain_quota":    newRemainQuota,
+				"used_quota":      newUsedQuota,
+				"accessed_time":   common.GetTimestamp(),
+				"usage_5h":        token.Usage5h,
+				"usage_1d":        token.Usage1d,
+				"usage_7d":        token.Usage7d,
+				"window_5h_start": token.Window5hStart,
+				"window_1d_start": token.Window1dStart,
+				"window_7d_start": token.Window7dStart,
 			}).Error; err != nil {
 				return err
 			}

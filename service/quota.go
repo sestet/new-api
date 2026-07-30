@@ -382,12 +382,17 @@ func PreConsumeTokenQuota(relayInfo *relaycommon.RelayInfo, quota int64) error {
 	//if relayInfo.TokenUnlimited {
 	//	return nil
 	//}
-	token, err := model.GetTokenByKey(relayInfo.TokenKey, false)
+	fromDB := relayInfo.TokenRateLimited
+	token, err := model.GetTokenByKey(relayInfo.TokenKey, fromDB)
 	if err != nil {
 		return err
 	}
 	if !relayInfo.TokenUnlimited && token.RemainQuota < quota {
 		return fmt.Errorf("token quota is not enough, token remain quota: %s, need quota: %s", logger.FormatQuota(token.RemainQuota), logger.FormatQuota(quota))
+	}
+	if token.HasRateLimits() {
+		relayInfo.TokenRateLimited = true
+		return model.DecreaseTokenQuotaWithRateLimit(relayInfo.TokenId, relayInfo.TokenKey, quota, relayInfo.StartTime.Unix(), true)
 	}
 	err = model.DecreaseTokenQuota(relayInfo.TokenId, relayInfo.TokenKey, quota)
 	if err != nil {
@@ -424,9 +429,17 @@ func PostConsumeQuota(relayInfo *relaycommon.RelayInfo, quota int64, preConsumed
 
 	if !relayInfo.IsPlayground {
 		if quota > 0 {
-			err = model.DecreaseTokenQuota(relayInfo.TokenId, relayInfo.TokenKey, quota)
+			if relayInfo.TokenRateLimited {
+				err = model.DecreaseTokenQuotaWithRateLimit(relayInfo.TokenId, relayInfo.TokenKey, quota, relayInfo.StartTime.Unix(), false)
+			} else {
+				err = model.DecreaseTokenQuota(relayInfo.TokenId, relayInfo.TokenKey, quota)
+			}
 		} else {
-			err = model.IncreaseTokenQuota(relayInfo.TokenId, relayInfo.TokenKey, -quota)
+			if relayInfo.TokenRateLimited {
+				err = model.IncreaseTokenQuotaWithRateLimit(relayInfo.TokenId, relayInfo.TokenKey, -quota, relayInfo.StartTime.Unix())
+			} else {
+				err = model.IncreaseTokenQuota(relayInfo.TokenId, relayInfo.TokenKey, -quota)
+			}
 		}
 		if err != nil {
 			return err
