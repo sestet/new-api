@@ -20,7 +20,7 @@
 5. 上游后续修订账单时，在配置的复核期限内再次核对并修正用户扣费。
 6. 将额度精度提升到每美元 `100,000,000` 个 quota，即最小可表示 `$0.00000001`。
 
-精准计费的配置、匹配规则和重试行为见[上游精准计费](./upstream-billing.md)；数据库边界见[开发阶段数据库策略](./database.md)；生图工具见[GPT Image Playground 集成](./image-playground.md)。
+精准计费的配置、匹配规则和重试行为见[上游精准计费](./upstream-billing.md)；数据库边界见[开发阶段数据库策略](./database.md)；生图工具见[GPT Image Playground 集成](./image-playground.md)；服务器部署见[Docker Compose 部署](./deployment.md)。
 
 ## 改动地图
 
@@ -45,6 +45,8 @@
 | 金额显示 | `web/src/lib/currency.ts`、`web/src/lib/format.ts`、`web/src/features/dashboard/lib/charts.ts` | 适配 `1e8` 精度和 `int64` quota 的格式化与图表汇总 |
 | 界面整理 | `web/src/routes/__root.tsx`、`web/src/features/keys/components/api-keys-columns.tsx` | 关闭开发环境 TanStack 浮动工具；修复 API 密钥额度文字拥挤 |
 | 分组计费设置 | `web/src/features/system-settings/models/group-billing-section.tsx`、`setting/ratio_setting/group_ratio.go` | 管理基础分组、基础倍率和用户分组到实际使用分组的覆盖倍率；新环境默认只保留 `default` |
+| API Key 时间限额 | `model/token.go`、`service/billing_session.go`、`web/src/features/keys/` | 支持 5 小时、1 天和 7 天独立固定窗口，按最终实扣额度累计，超限返回 429 |
+| Docker Compose 部署 | `docker-compose.yml`、`scripts/setup-docker.sh` | 本地镜像部署；密钥写入 Git 忽略的 `.env`，支持一键生成和启动 |
 | 国际化 | `web/src/i18n/locales/*.json` | 增加上游账号、精准计费、连接状态、复核和对账相关文案 |
 
 ## 开发数据库
