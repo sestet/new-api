@@ -7,7 +7,7 @@ GPT Image Playground 作为登录后的独立菜单和路由接入现有前端�
 - 页面从当前用户已有的 API Token 中选择一个可用 Token。
 - 选择 Token 后，通过受保护的 Token 明文接口读取一次完整 Key，并只缓存在当前页面运行内存中。
 - 模型列表通过同源 `GET /v1/models` 获取，因此不同 Token 会按各自权限和分组返回模型。
-- 生图和编辑请求使用 `${window.location.origin}/v1`，生产环境直接访问同域后端；本地 `5173` 由 Rsbuild 将 `/v1` 转发到后端。
+- 生图和编辑请求使用 `${window.location.origin}/v1`，生产环境直接访问同域后端；本地 `8080` 由 Rsbuild 将 `/v1` 转发到后端。
 - 默认优先选择名称包含 `image` 或 `dall-e` 的模型，没有匹配时使用第一项，最终回退到 `gpt-image-2`。
 
 ## 数据存储

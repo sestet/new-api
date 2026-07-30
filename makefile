@@ -1,6 +1,6 @@
 WEB_DIR = ./web
 API_DIR = .
-DEV_WEB_PORT ?= 5173
+DEV_WEB_PORT ?= 8080
 DEV_COMPOSE_FILE = docker-compose.dev.yml
 DEV_POSTGRES_SERVICE = postgres
 DEV_API_SERVICE = new-api

@@ -38,7 +38,7 @@ npm run dev-app
 
 This will:
 - Use the Go backend on port 3000
-- Use the Rsbuild frontend development server on port 5173
+- Use the Rsbuild frontend development server on port 8080
 - Open an Electron window with DevTools enabled
 - Create a system tray icon (menu bar on macOS)
 - Store database in `../data/new-api.db`
