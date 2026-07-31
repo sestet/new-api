@@ -27,6 +27,7 @@ import { CacheStatsDialog } from '@/features/system-settings/general/channel-aff
 import { useSidebarConfig } from '@/hooks/use-sidebar-config'
 
 import { UserInfoDialog } from './components/dialogs/user-info-dialog'
+import { UsageAnalyticsPanel } from './components/usage-analytics-panel'
 import {
   type LogsViewScope,
   UsageLogsProvider,
@@ -45,7 +46,7 @@ const TASK_LOG_SECTIONS = ['drawing', 'task'] as const
 
 const SECTION_META: Record<UsageLogsSectionId, { titleKey: string }> = {
   common: {
-    titleKey: 'Common Logs',
+    titleKey: 'Usage Logs',
   },
   drawing: {
     titleKey: 'Drawing Logs',
@@ -124,7 +125,7 @@ function UsageLogsContent() {
 
   return (
     <>
-      <SectionPageLayout fixedContent>
+      <SectionPageLayout fixedContent={activeCategory !== 'common'}>
         <SectionPageLayout.Title>
           {t(pageMeta.titleKey)}
         </SectionPageLayout.Title>
@@ -139,7 +140,7 @@ function UsageLogsContent() {
           </SectionPageLayout.Actions>
         )}
         <SectionPageLayout.Content>
-          <div className='flex h-full min-h-0 flex-col gap-4'>
+          <div className='flex min-h-0 flex-col gap-4'>
             {showTaskSwitcher && (
               <Tabs value={activeCategory} onValueChange={handleSectionChange}>
                 <TabsList className='max-w-full flex-wrap justify-start group-data-horizontal/tabs:h-auto'>
@@ -151,6 +152,7 @@ function UsageLogsContent() {
                 </TabsList>
               </Tabs>
             )}
+            {activeCategory === 'common' && <UsageAnalyticsPanel />}
             <div className='min-h-0 flex-1'>
               <UsageLogsTable logCategory={activeCategory} />
             </div>

@@ -80,6 +80,67 @@ type Log struct {
 	Other             string `json:"other"`
 }
 
+type UsageAnalyticsParams struct {
+	UserId            int
+	LogType           int
+	StartTimestamp    int64
+	EndTimestamp      int64
+	ModelName         string
+	Username          string
+	TokenName         string
+	Channel           int
+	Group             string
+	RequestId         string
+	UpstreamRequestId string
+	BillingStatus     string
+}
+
+type UsageAnalyticsSummary struct {
+	RequestCount int64 `json:"request_count"`
+	ErrorCount   int64 `json:"error_count"`
+	RefundCount  int64 `json:"refund_count"`
+	TokenCount   int64 `json:"token_count"`
+	Quota        int64 `json:"quota"`
+	Exact        int64 `json:"exact"`
+	Estimated    int64 `json:"estimated"`
+	Pending      int64 `json:"pending"`
+	Failed       int64 `json:"failed"`
+}
+
+type UsageAnalyticsTrend struct {
+	Timestamp    int64 `json:"timestamp" gorm:"column:bucket"`
+	RequestCount int64 `json:"request_count"`
+	TokenCount   int64 `json:"token_count"`
+	Quota        int64 `json:"quota"`
+}
+
+type UsageAnalyticsDimension struct {
+	Name         string `json:"name"`
+	RequestCount int64  `json:"request_count"`
+	TokenCount   int64  `json:"token_count"`
+	Quota        int64  `json:"quota"`
+}
+
+type UsageAnalytics struct {
+	Summary UsageAnalyticsSummary     `json:"summary"`
+	Trend   []UsageAnalyticsTrend     `json:"trend"`
+	Models  []UsageAnalyticsDimension `json:"models"`
+	Groups  []UsageAnalyticsDimension `json:"groups"`
+}
+
+type UsageFilterChannel struct {
+	Id   int    `json:"id"`
+	Name string `json:"name"`
+}
+
+type UsageFilterOptions struct {
+	Models   []string             `json:"models"`
+	Groups   []string             `json:"groups"`
+	Tokens   []string             `json:"tokens"`
+	Users    []string             `json:"users"`
+	Channels []UsageFilterChannel `json:"channels"`
+}
+
 // don't use iota, avoid change log type value
 const (
 	LogTypeUnknown = 0
@@ -91,6 +152,14 @@ const (
 	LogTypeRefund  = 6
 	LogTypeLogin   = 7
 )
+
+func usageLogTypeValues() []int {
+	return []int{LogTypeConsume, LogTypeError, LogTypeRefund}
+}
+
+func isUsageLogType(logType int) bool {
+	return logType == LogTypeConsume || logType == LogTypeError || logType == LogTypeRefund
+}
 
 func ensureLogRequestId(log *Log) {
 	if log != nil && log.RequestId == "" {
@@ -500,11 +569,33 @@ func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
 }
 
 func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, startIdx int, num int, channel int, group string, requestId string, upstreamRequestId string, billingStatus string) (logs []*Log, total int64, err error) {
-	var tx *gorm.DB
-	if logType == LogTypeUnknown {
-		tx = LOG_DB
-	} else {
-		tx = LOG_DB.Where("logs.type = ?", logType)
+	logTypes := []int{}
+	if logType != LogTypeUnknown {
+		logTypes = []int{logType}
+	}
+	return getAllLogs(logTypes, startTimestamp, endTimestamp, modelName, username, tokenName, startIdx, num, channel, group, requestId, upstreamRequestId, billingStatus)
+}
+
+func GetAllUsageLogs(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, startIdx int, num int, channel int, group string, requestId string, upstreamRequestId string, billingStatus string) (logs []*Log, total int64, err error) {
+	logTypes := usageLogTypeValues()
+	if isUsageLogType(logType) {
+		logTypes = []int{logType}
+	}
+	return getAllLogs(logTypes, startTimestamp, endTimestamp, modelName, username, tokenName, startIdx, num, channel, group, requestId, upstreamRequestId, billingStatus)
+}
+
+func GetAuditLogs(logType int, startTimestamp int64, endTimestamp int64, username string, startIdx int, num int) (logs []*Log, total int64, err error) {
+	logTypes := []int{LogTypeLogin, LogTypeManage, LogTypeSystem}
+	if logType == LogTypeLogin || logType == LogTypeManage || logType == LogTypeSystem {
+		logTypes = []int{logType}
+	}
+	return getAllLogs(logTypes, startTimestamp, endTimestamp, "", username, "", startIdx, num, 0, "", "", "", "")
+}
+
+func getAllLogs(logTypes []int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, startIdx int, num int, channel int, group string, requestId string, upstreamRequestId string, billingStatus string) (logs []*Log, total int64, err error) {
+	tx := LOG_DB
+	if len(logTypes) > 0 {
+		tx = tx.Where("logs.type IN ?", logTypes)
 	}
 
 	if tx, err = applyExplicitLogTextFilter(tx, "logs.model_name", modelName); err != nil {
@@ -599,11 +690,25 @@ func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName
 const logSearchCountLimit = 10000
 
 func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int64, modelName string, tokenName string, startIdx int, num int, group string, requestId string, upstreamRequestId string, billingStatus string) (logs []*Log, total int64, err error) {
-	var tx *gorm.DB
-	if logType == LogTypeUnknown {
-		tx = LOG_DB.Where("logs.user_id = ?", userId)
-	} else {
-		tx = LOG_DB.Where("logs.user_id = ? and logs.type = ?", userId, logType)
+	logTypes := []int{}
+	if logType != LogTypeUnknown {
+		logTypes = []int{logType}
+	}
+	return getUserLogs(userId, logTypes, startTimestamp, endTimestamp, modelName, tokenName, startIdx, num, group, requestId, upstreamRequestId, billingStatus)
+}
+
+func GetUserUsageLogs(userId int, logType int, startTimestamp int64, endTimestamp int64, modelName string, tokenName string, startIdx int, num int, group string, requestId string, upstreamRequestId string, billingStatus string) (logs []*Log, total int64, err error) {
+	logTypes := usageLogTypeValues()
+	if isUsageLogType(logType) {
+		logTypes = []int{logType}
+	}
+	return getUserLogs(userId, logTypes, startTimestamp, endTimestamp, modelName, tokenName, startIdx, num, group, requestId, upstreamRequestId, billingStatus)
+}
+
+func getUserLogs(userId int, logTypes []int, startTimestamp int64, endTimestamp int64, modelName string, tokenName string, startIdx int, num int, group string, requestId string, upstreamRequestId string, billingStatus string) (logs []*Log, total int64, err error) {
+	tx := LOG_DB.Where("logs.user_id = ?", userId)
+	if len(logTypes) > 0 {
+		tx = tx.Where("logs.type IN ?", logTypes)
 	}
 
 	if tx, err = applyExplicitLogTextFilter(tx, "logs.model_name", modelName); err != nil {
@@ -765,6 +870,218 @@ func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelNa
 	}
 
 	return stat, nil
+}
+
+func applyUsageAnalyticsFilters(tx *gorm.DB, params UsageAnalyticsParams) (*gorm.DB, error) {
+	var err error
+	if isUsageLogType(params.LogType) {
+		tx = tx.Where("type = ?", params.LogType)
+	}
+	if params.UserId > 0 {
+		tx = tx.Where("user_id = ?", params.UserId)
+	}
+	if tx, err = applyExplicitLogTextFilter(tx, "username", params.Username); err != nil {
+		return nil, err
+	}
+	if tx, err = applyExplicitLogTextFilter(tx, "model_name", params.ModelName); err != nil {
+		return nil, err
+	}
+	if params.TokenName != "" {
+		tx = tx.Where("token_name = ?", params.TokenName)
+	}
+	if params.StartTimestamp != 0 {
+		tx = tx.Where("created_at >= ?", params.StartTimestamp)
+	}
+	if params.EndTimestamp != 0 {
+		tx = tx.Where("created_at <= ?", params.EndTimestamp)
+	}
+	if params.Channel != 0 {
+		tx = tx.Where("channel_id = ?", params.Channel)
+	}
+	if params.Group != "" {
+		tx = tx.Where(logGroupCol+" = ?", params.Group)
+	}
+	if params.RequestId != "" {
+		tx = tx.Where("request_id = ?", params.RequestId)
+	}
+	if params.UpstreamRequestId != "" {
+		tx = tx.Where("upstream_request_id = ?", params.UpstreamRequestId)
+	}
+	return applyUpstreamBillingStatusFilter(tx, "", params.BillingStatus)
+}
+
+func queryUsageAnalyticsDimension(tx *gorm.DB, selectColumn string, groupColumn string) ([]UsageAnalyticsDimension, error) {
+	items := make([]UsageAnalyticsDimension, 0)
+	err := tx.
+		Select(selectColumn + " AS name, count(*) AS request_count, COALESCE(sum(prompt_tokens), 0) + COALESCE(sum(completion_tokens), 0) AS token_count, COALESCE(sum(quota), 0) AS quota").
+		Group(groupColumn).
+		Order("quota DESC").
+		Limit(8).
+		Scan(&items).Error
+	return items, err
+}
+
+const usageFilterOptionLimit = 200
+
+func queryUsageFilterValues(tx *gorm.DB, column string) ([]string, error) {
+	rows := make([]struct {
+		Value string `gorm:"column:value"`
+	}, 0)
+	err := tx.
+		Select("DISTINCT "+column+" AS value").
+		Where(column+" <> ?", "").
+		Order(column + " ASC").
+		Limit(usageFilterOptionLimit).
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	values := make([]string, 0, len(rows))
+	for _, row := range rows {
+		values = append(values, row.Value)
+	}
+	return values, nil
+}
+
+func GetUsageFilterOptions(userId int, startTimestamp int64, endTimestamp int64) (UsageFilterOptions, error) {
+	options := UsageFilterOptions{
+		Models:   make([]string, 0),
+		Groups:   make([]string, 0),
+		Tokens:   make([]string, 0),
+		Users:    make([]string, 0),
+		Channels: make([]UsageFilterChannel, 0),
+	}
+	base := LOG_DB.Table("logs").Where("type IN ?", usageLogTypeValues())
+	if userId > 0 {
+		base = base.Where("user_id = ?", userId)
+	}
+	if startTimestamp != 0 {
+		base = base.Where("created_at >= ?", startTimestamp)
+	}
+	if endTimestamp != 0 {
+		base = base.Where("created_at <= ?", endTimestamp)
+	}
+
+	var err error
+	if options.Models, err = queryUsageFilterValues(base.Session(&gorm.Session{}), "model_name"); err != nil {
+		return options, err
+	}
+	if options.Groups, err = queryUsageFilterValues(base.Session(&gorm.Session{}), logGroupCol); err != nil {
+		return options, err
+	}
+	if options.Tokens, err = queryUsageFilterValues(base.Session(&gorm.Session{}), "token_name"); err != nil {
+		return options, err
+	}
+	if userId > 0 {
+		return options, nil
+	}
+	if options.Users, err = queryUsageFilterValues(base.Session(&gorm.Session{}), "username"); err != nil {
+		return options, err
+	}
+
+	channelRows := make([]struct {
+		Id int `gorm:"column:id"`
+	}, 0)
+	if err = base.Session(&gorm.Session{}).
+		Select("DISTINCT channel_id AS id").
+		Where("channel_id <> ?", 0).
+		Order("channel_id ASC").
+		Limit(usageFilterOptionLimit).
+		Scan(&channelRows).Error; err != nil {
+		return options, err
+	}
+	if len(channelRows) == 0 {
+		return options, nil
+	}
+
+	channelIds := make([]int, 0, len(channelRows))
+	for _, row := range channelRows {
+		channelIds = append(channelIds, row.Id)
+	}
+	channelNames := make([]UsageFilterChannel, 0, len(channelIds))
+	if err = DB.Table("channels").Select("id, name").Where("id IN ?", channelIds).Find(&channelNames).Error; err != nil {
+		return options, err
+	}
+	nameById := make(map[int]string, len(channelNames))
+	for _, channel := range channelNames {
+		nameById[channel.Id] = channel.Name
+	}
+	for _, channelId := range channelIds {
+		options.Channels = append(options.Channels, UsageFilterChannel{
+			Id:   channelId,
+			Name: nameById[channelId],
+		})
+	}
+	return options, nil
+}
+
+func GetUsageAnalytics(params UsageAnalyticsParams) (UsageAnalytics, error) {
+	analytics := UsageAnalytics{
+		Trend:  make([]UsageAnalyticsTrend, 0),
+		Models: make([]UsageAnalyticsDimension, 0),
+		Groups: make([]UsageAnalyticsDimension, 0),
+	}
+	if params.EndTimestamp != 0 && params.StartTimestamp != 0 {
+		if params.EndTimestamp < params.StartTimestamp {
+			return analytics, errors.New("invalid usage analytics time range")
+		}
+		if params.EndTimestamp-params.StartTimestamp > 90*24*60*60 {
+			return analytics, errors.New("usage analytics time range cannot exceed 90 days")
+		}
+	}
+
+	base := LOG_DB.Table("logs").Where("type IN ?", usageLogTypeValues())
+	var err error
+	if base, err = applyUsageAnalyticsFilters(base, params); err != nil {
+		return analytics, err
+	}
+
+	summarySelect := `
+		COALESCE(sum(CASE WHEN type = ? THEN 1 ELSE 0 END), 0) AS request_count,
+		COALESCE(sum(CASE WHEN type = ? THEN 1 ELSE 0 END), 0) AS error_count,
+		COALESCE(sum(CASE WHEN type = ? THEN 1 ELSE 0 END), 0) AS refund_count,
+		COALESCE(sum(CASE WHEN type = ? THEN prompt_tokens + completion_tokens ELSE 0 END), 0) AS token_count,
+		COALESCE(sum(CASE WHEN type = ? THEN quota ELSE 0 END), 0) AS quota,
+		COALESCE(sum(CASE WHEN type = ? AND other LIKE ? THEN 1 ELSE 0 END), 0) AS exact,
+		COALESCE(sum(CASE WHEN type = ? AND other LIKE ? THEN 1 ELSE 0 END), 0) AS estimated,
+		COALESCE(sum(CASE WHEN type = ? AND other LIKE ? THEN 1 ELSE 0 END), 0) AS pending,
+		COALESCE(sum(CASE WHEN type = ? AND other LIKE ? THEN 1 ELSE 0 END), 0) AS failed`
+	if err = base.Session(&gorm.Session{}).Select(
+		summarySelect,
+		LogTypeConsume,
+		LogTypeError,
+		LogTypeRefund,
+		LogTypeConsume,
+		LogTypeConsume,
+		LogTypeConsume, upstreamBillingStatusPattern(UpstreamBillingStatusExact),
+		LogTypeConsume, upstreamBillingStatusPattern(UpstreamBillingStatusEstimated),
+		LogTypeConsume, upstreamBillingStatusPattern(UpstreamBillingStatusPending),
+		LogTypeConsume, upstreamBillingStatusPattern(UpstreamBillingStatusFailed),
+	).Scan(&analytics.Summary).Error; err != nil {
+		return analytics, err
+	}
+
+	chartBase := base.Session(&gorm.Session{}).Where("type <> ?", LogTypeRefund)
+	bucketSeconds := int64(3600)
+	if params.EndTimestamp-params.StartTimestamp > 3*24*60*60 {
+		bucketSeconds = 24 * 60 * 60
+	}
+	if err = chartBase.Session(&gorm.Session{}).
+		Select("created_at - (created_at % ?) AS bucket, count(*) AS request_count, COALESCE(sum(CASE WHEN type = ? THEN prompt_tokens + completion_tokens ELSE 0 END), 0) AS token_count, COALESCE(sum(CASE WHEN type = ? THEN quota ELSE 0 END), 0) AS quota", bucketSeconds, LogTypeConsume, LogTypeConsume).
+		Group("bucket").
+		Order("bucket ASC").
+		Scan(&analytics.Trend).Error; err != nil {
+		return analytics, err
+	}
+
+	dimensionBase := base.Session(&gorm.Session{}).Where("type = ?", LogTypeConsume)
+	if analytics.Models, err = queryUsageAnalyticsDimension(dimensionBase.Session(&gorm.Session{}), "model_name", "model_name"); err != nil {
+		return analytics, err
+	}
+	if analytics.Groups, err = queryUsageAnalyticsDimension(dimensionBase.Session(&gorm.Session{}), logGroupCol, "group"); err != nil {
+		return analytics, err
+	}
+	return analytics, nil
 }
 
 func SumUsedToken(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string) (token int) {

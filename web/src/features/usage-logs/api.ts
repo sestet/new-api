@@ -24,6 +24,8 @@ import type {
   GetLogsResponse,
   GetLogStatsParams,
   GetLogStatsResponse,
+  GetUsageAnalyticsResponse,
+  GetUsageFilterOptionsResponse,
   GetMidjourneyLogsParams,
   GetTaskLogsParams,
   UserInfo,
@@ -70,12 +72,52 @@ async function fetchLogStats<T>(
 // Common Log APIs
 // ============================================================================
 
-export const getAllLogs = (params: GetLogsParams = {}) =>
-  fetchLogs('/api/log', params, true)
+export const getAllUsageLogs = (params: GetLogsParams = {}) =>
+  fetchLogs('/api/log/usage', params, true)
 
-export const getUserLogs = (
+export const getUserUsageLogs = (
   params: Omit<GetLogsParams, 'username' | 'channel'> = {}
-) => fetchLogs('/api/log', params, false)
+) => fetchLogs('/api/log/usage', params, false)
+
+export async function getUsageAnalytics(
+  params: GetLogStatsParams,
+  isAdmin: boolean
+): Promise<GetUsageAnalyticsResponse> {
+  const queryParams = buildQueryParams(
+    params as unknown as Record<string, unknown>
+  )
+  const path = isAdmin
+    ? '/api/log/usage/analytics'
+    : '/api/log/usage/self/analytics'
+  const res = await api.get(`${path}?${queryParams}`)
+  return res.data
+}
+
+export async function getUsageFilterOptions(
+  params: Pick<GetLogStatsParams, 'start_timestamp' | 'end_timestamp'>,
+  isAdmin: boolean
+): Promise<GetUsageFilterOptionsResponse> {
+  const queryParams = buildQueryParams(params)
+  const path = isAdmin
+    ? '/api/log/usage/options'
+    : '/api/log/usage/self/options'
+  const res = await api.get(`${path}?${queryParams}`)
+  return res.data
+}
+
+export async function getAuditLogs(
+  params: GetLogsParams & {
+    category: 'login' | 'operation' | 'system'
+  }
+): Promise<GetLogsResponse> {
+  const queryParams = buildQueryParams({
+    p: params.p || 1,
+    page_size: params.page_size || 20,
+    ...params,
+  })
+  const res = await api.get(`/api/log/audit?${queryParams}`)
+  return res.data
+}
 
 export const getLogStats = (params: GetLogStatsParams = {}) =>
   fetchLogStats('/api/log', params, true)

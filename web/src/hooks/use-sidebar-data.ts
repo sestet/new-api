@@ -29,6 +29,7 @@ import {
   Radio,
   ServerCog,
   Settings,
+  ShieldCheck,
   Ticket,
   User,
   Users,
@@ -143,6 +144,12 @@ export function useSidebarData(): SidebarData {
             title: t('Subscriptions'),
             url: '/subscriptions',
             icon: CreditCard,
+          },
+          {
+            title: t('Audit Logs'),
+            url: '/audit-logs/login',
+            activeUrls: ['/audit-logs'],
+            icon: ShieldCheck,
           },
           {
             title: t('System Info'),

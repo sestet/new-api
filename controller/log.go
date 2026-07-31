@@ -57,6 +57,160 @@ func GetUserLogs(c *gin.Context) {
 	return
 }
 
+func GetAllUsageLogs(c *gin.Context) {
+	pageInfo := common.GetPageQuery(c)
+	logType, _ := strconv.Atoi(c.Query("type"))
+	startTimestamp, _ := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)
+	endTimestamp, _ := strconv.ParseInt(c.Query("end_timestamp"), 10, 64)
+	channel, _ := strconv.Atoi(c.Query("channel"))
+	logs, total, err := model.GetAllUsageLogs(
+		logType,
+		startTimestamp,
+		endTimestamp,
+		c.Query("model_name"),
+		c.Query("username"),
+		c.Query("token_name"),
+		pageInfo.GetStartIdx(),
+		pageInfo.GetPageSize(),
+		channel,
+		c.Query("group"),
+		c.Query("request_id"),
+		c.Query("upstream_request_id"),
+		c.Query("billing_status"),
+	)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	pageInfo.SetTotal(int(total))
+	pageInfo.SetItems(logs)
+	common.ApiSuccess(c, pageInfo)
+}
+
+func GetUserUsageLogs(c *gin.Context) {
+	pageInfo := common.GetPageQuery(c)
+	logType, _ := strconv.Atoi(c.Query("type"))
+	startTimestamp, _ := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)
+	endTimestamp, _ := strconv.ParseInt(c.Query("end_timestamp"), 10, 64)
+	logs, total, err := model.GetUserUsageLogs(
+		c.GetInt("id"),
+		logType,
+		startTimestamp,
+		endTimestamp,
+		c.Query("model_name"),
+		c.Query("token_name"),
+		pageInfo.GetStartIdx(),
+		pageInfo.GetPageSize(),
+		c.Query("group"),
+		c.Query("request_id"),
+		c.Query("upstream_request_id"),
+		c.Query("billing_status"),
+	)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	pageInfo.SetTotal(int(total))
+	pageInfo.SetItems(logs)
+	common.ApiSuccess(c, pageInfo)
+}
+
+func getUsageFilterOptions(c *gin.Context, self bool) {
+	startTimestamp, _ := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)
+	endTimestamp, _ := strconv.ParseInt(c.Query("end_timestamp"), 10, 64)
+	userId := 0
+	if self {
+		userId = c.GetInt("id")
+	}
+	options, err := model.GetUsageFilterOptions(userId, startTimestamp, endTimestamp)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, options)
+}
+
+func GetAllUsageFilterOptions(c *gin.Context) {
+	getUsageFilterOptions(c, false)
+}
+
+func GetUserUsageFilterOptions(c *gin.Context) {
+	getUsageFilterOptions(c, true)
+}
+
+func getUsageAnalytics(c *gin.Context, self bool) {
+	logType, _ := strconv.Atoi(c.Query("type"))
+	startTimestamp, _ := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)
+	endTimestamp, _ := strconv.ParseInt(c.Query("end_timestamp"), 10, 64)
+	channel, _ := strconv.Atoi(c.Query("channel"))
+	params := model.UsageAnalyticsParams{
+		LogType:           logType,
+		StartTimestamp:    startTimestamp,
+		EndTimestamp:      endTimestamp,
+		ModelName:         c.Query("model_name"),
+		Username:          c.Query("username"),
+		TokenName:         c.Query("token_name"),
+		Channel:           channel,
+		Group:             c.Query("group"),
+		RequestId:         c.Query("request_id"),
+		UpstreamRequestId: c.Query("upstream_request_id"),
+		BillingStatus:     c.Query("billing_status"),
+	}
+	if self {
+		params.UserId = c.GetInt("id")
+		params.Username = ""
+		params.Channel = 0
+	}
+	analytics, err := model.GetUsageAnalytics(params)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, analytics)
+}
+
+func GetAllUsageAnalytics(c *gin.Context) {
+	getUsageAnalytics(c, false)
+}
+
+func GetUserUsageAnalytics(c *gin.Context) {
+	getUsageAnalytics(c, true)
+}
+
+func GetAuditLogs(c *gin.Context) {
+	logType := model.LogTypeUnknown
+	switch c.Query("category") {
+	case "", "all":
+	case "login":
+		logType = model.LogTypeLogin
+	case "operation":
+		logType = model.LogTypeManage
+	case "system":
+		logType = model.LogTypeSystem
+	default:
+		common.ApiErrorMsg(c, "invalid audit log category")
+		return
+	}
+	pageInfo := common.GetPageQuery(c)
+	startTimestamp, _ := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)
+	endTimestamp, _ := strconv.ParseInt(c.Query("end_timestamp"), 10, 64)
+	logs, total, err := model.GetAuditLogs(
+		logType,
+		startTimestamp,
+		endTimestamp,
+		c.Query("username"),
+		pageInfo.GetStartIdx(),
+		pageInfo.GetPageSize(),
+	)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	pageInfo.SetTotal(int(total))
+	pageInfo.SetItems(logs)
+	common.ApiSuccess(c, pageInfo)
+}
+
 // Deprecated: SearchAllLogs 已废弃，前端未使用该接口。
 func SearchAllLogs(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{

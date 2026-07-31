@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useQueryClient, useIsFetching } from '@tanstack/react-query'
+import { useQuery, useQueryClient, useIsFetching } from '@tanstack/react-query'
 import { useNavigate, getRouteApi } from '@tanstack/react-router'
 import type { Table } from '@tanstack/react-table'
 import { Eye, EyeOff } from 'lucide-react'
@@ -38,30 +38,31 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 
+import { getUsageFilterOptions } from '../api'
 import {
   LOG_TYPE_ALL_VALUE,
-  LOG_TYPE_FILTERS,
+  USAGE_LOG_TYPE_FILTERS,
   UPSTREAM_BILLING_STATUS_FILTERS,
 } from '../constants'
 import { buildSearchParams } from '../lib/filter'
 import { getDefaultTimeRange } from '../lib/utils'
 import type { CommonLogFilters, UpstreamBillingStatusFilter } from '../types'
-import { CommonLogsStats } from './common-logs-stats'
 import { CompactDateTimeRangePicker } from './compact-date-time-range-picker'
 import {
   LogsFilterField,
   LogsFilterInput,
   LogsFilterToolbar,
 } from './logs-filter-toolbar'
+import { UsageFilterCombobox } from './usage-filter-combobox'
 import { useLogsViewScope, useUsageLogsContext } from './usage-logs-provider'
 
 const route = getRouteApi('/_authenticated/usage-logs/$section')
 
-type LogTypeValue = (typeof LOG_TYPE_FILTERS)[number]['value']
+type LogTypeValue = (typeof USAGE_LOG_TYPE_FILTERS)[number]['value']
 type BillingStatusValue =
   (typeof UPSTREAM_BILLING_STATUS_FILTERS)[number]['value']
 const logTypeValueSet = new Set<string>(
-  LOG_TYPE_FILTERS.map((type) => type.value)
+  USAGE_LOG_TYPE_FILTERS.map((type) => type.value)
 )
 const billingStatusValueSet = new Set<string>(
   UPSTREAM_BILLING_STATUS_FILTERS.map((status) => status.value)
@@ -71,6 +72,14 @@ type CommonLogDraft = {
   sourceKey: string
   filters: CommonLogFilters
   logType: LogTypeValue
+}
+
+const EMPTY_FILTER_OPTIONS = {
+  models: [],
+  groups: [],
+  tokens: [],
+  users: [],
+  channels: [],
 }
 
 function isLogTypeValue(value: string): value is LogTypeValue {
@@ -189,6 +198,58 @@ export function CommonLogsFilterBar<TData>(
     draft.sourceKey === searchState.sourceKey ? draft : searchState
   const filters = activeDraft.filters
   const logType = activeDraft.logType
+  const filterOptionsQuery = useQuery({
+    queryKey: [
+      'usage-log-filter-options',
+      isAdmin,
+      searchState.filters.startTime?.getTime(),
+      searchState.filters.endTime?.getTime(),
+    ],
+    queryFn: () =>
+      getUsageFilterOptions(
+        {
+          start_timestamp: searchState.filters.startTime
+            ? Math.floor(searchState.filters.startTime.getTime() / 1000)
+            : undefined,
+          end_timestamp: searchState.filters.endTime
+            ? Math.floor(searchState.filters.endTime.getTime() / 1000)
+            : undefined,
+        },
+        isAdmin
+      ),
+    select: (response) =>
+      response.success
+        ? (response.data ?? EMPTY_FILTER_OPTIONS)
+        : EMPTY_FILTER_OPTIONS,
+    staleTime: 60_000,
+  })
+  const filterOptions = filterOptionsQuery.data ?? EMPTY_FILTER_OPTIONS
+  const modelOptions = useMemo(
+    () => filterOptions.models.map((value) => ({ value, label: value })),
+    [filterOptions.models]
+  )
+  const groupOptions = useMemo(
+    () => filterOptions.groups.map((value) => ({ value, label: value })),
+    [filterOptions.groups]
+  )
+  const tokenOptions = useMemo(
+    () => filterOptions.tokens.map((value) => ({ value, label: value })),
+    [filterOptions.tokens]
+  )
+  const userOptions = useMemo(
+    () => filterOptions.users.map((value) => ({ value, label: value })),
+    [filterOptions.users]
+  )
+  const channelOptions = useMemo(
+    () =>
+      filterOptions.channels.map((channel) => ({
+        value: String(channel.id),
+        label: channel.name
+          ? `${channel.name} (#${channel.id})`
+          : `#${channel.id}`,
+      })),
+    [filterOptions.channels]
+  )
 
   const handleChange = useCallback(
     (field: keyof CommonLogFilters, value: Date | string | undefined) => {
@@ -217,7 +278,7 @@ export function CommonLogsFilterBar<TData>(
       },
     })
     queryClient.invalidateQueries({ queryKey: ['logs'] })
-    queryClient.invalidateQueries({ queryKey: ['usage-logs-stats'] })
+    queryClient.invalidateQueries({ queryKey: ['usage-analytics'] })
   }, [filters, logType, navigate, queryClient])
 
   const handleReset = useCallback(() => {
@@ -244,7 +305,7 @@ export function CommonLogsFilterBar<TData>(
       },
     })
     queryClient.invalidateQueries({ queryKey: ['logs'] })
-    queryClient.invalidateQueries({ queryKey: ['usage-logs-stats'] })
+    queryClient.invalidateQueries({ queryKey: ['usage-analytics'] })
   }, [navigate, queryClient])
 
   const handleKeyDown = useCallback(
@@ -277,10 +338,9 @@ export function CommonLogsFilterBar<TData>(
     filters.requestId,
     filters.upstreamRequestId,
   ].filter(Boolean).length
-  const sensitiveType = sensitiveVisible ? 'text' : 'password'
   const logTypeItems = useMemo(
     () =>
-      LOG_TYPE_FILTERS.map((type) => ({
+      USAGE_LOG_TYPE_FILTERS.map((type) => ({
         value: type.value,
         label: t(type.label),
       })),
@@ -301,11 +361,6 @@ export function CommonLogsFilterBar<TData>(
     billingStatusItems.find((status) => status.value === billingStatus)
       ?.label ?? t('All billing statuses')
 
-  const statsBar = (
-    <div className='flex flex-wrap items-center gap-2'>
-      <CommonLogsStats />
-    </div>
-  )
   const sensitiveToggle = (
     <Tooltip>
       <TooltipTrigger
@@ -341,21 +396,22 @@ export function CommonLogsFilterBar<TData>(
   )
   const modelFilter = (
     <LogsFilterField>
-      <LogsFilterInput
+      <UsageFilterCombobox
         placeholder={t('Model Name')}
+        options={modelOptions}
         value={filters.model || ''}
-        onChange={(e) => handleChange('model', e.target.value)}
-        onKeyDown={handleKeyDown}
+        onValueChange={(value) => handleChange('model', value)}
       />
     </LogsFilterField>
   )
   const groupFilter = (
     <LogsFilterField>
-      <LogsFilterInput
+      <UsageFilterCombobox
         placeholder={t('Group')}
-        type={sensitiveType}
+        options={groupOptions}
         value={filters.group || ''}
-        onChange={(e) => handleChange('group', e.target.value)}
+        masked={!sensitiveVisible}
+        onValueChange={(value) => handleChange('group', value)}
         onKeyDown={handleKeyDown}
       />
     </LogsFilterField>
@@ -413,7 +469,7 @@ export function CommonLogsFilterBar<TData>(
         </SelectTrigger>
         <SelectContent alignItemWithTrigger={false}>
           <SelectGroup>
-            {LOG_TYPE_FILTERS.map((type) => (
+            {USAGE_LOG_TYPE_FILTERS.map((type) => (
               <SelectItem key={type.value} value={type.value}>
                 {t(type.label)}
               </SelectItem>
@@ -427,32 +483,34 @@ export function CommonLogsFilterBar<TData>(
     <>
       {groupFilter}
       <LogsFilterField>
-        <LogsFilterInput
+        <UsageFilterCombobox
           placeholder={t('Token Name')}
-          type={sensitiveType}
+          options={tokenOptions}
           value={filters.token || ''}
-          onChange={(e) => handleChange('token', e.target.value)}
+          masked={!sensitiveVisible}
+          onValueChange={(value) => handleChange('token', value)}
           onKeyDown={handleKeyDown}
         />
       </LogsFilterField>
       {isAdmin && (
         <LogsFilterField>
-          <LogsFilterInput
+          <UsageFilterCombobox
             placeholder={t('Username')}
-            type={sensitiveType}
+            options={userOptions}
             value={filters.username || ''}
-            onChange={(e) => handleChange('username', e.target.value)}
+            masked={!sensitiveVisible}
+            onValueChange={(value) => handleChange('username', value)}
             onKeyDown={handleKeyDown}
           />
         </LogsFilterField>
       )}
       {isAdmin && (
         <LogsFilterField>
-          <LogsFilterInput
+          <UsageFilterCombobox
             placeholder={t('Channel ID')}
+            options={channelOptions}
             value={filters.channel || ''}
-            onChange={(e) => handleChange('channel', e.target.value)}
-            onKeyDown={handleKeyDown}
+            onValueChange={(value) => handleChange('channel', value)}
           />
         </LogsFilterField>
       )}
@@ -478,7 +536,6 @@ export function CommonLogsFilterBar<TData>(
   return (
     <LogsFilterToolbar
       table={props.table}
-      stats={statsBar}
       actionStart={sensitiveToggle}
       primaryFilters={
         <>

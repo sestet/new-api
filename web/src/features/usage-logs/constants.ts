@@ -129,6 +129,19 @@ export const LOG_TYPE_FILTERS = [
   ),
 ] as const
 
+export const USAGE_LOG_TYPE_FILTERS = [
+  { label: 'All Types', value: LOG_TYPE_ALL_VALUE },
+  ...LOG_TYPES.filter(
+    (type) =>
+      type.value === LOG_TYPE_ENUM.CONSUME ||
+      type.value === LOG_TYPE_ENUM.ERROR ||
+      type.value === LOG_TYPE_ENUM.REFUND
+  ).map((type) => ({
+    label: type.label,
+    value: String(type.value),
+  })),
+] as const
+
 // ============================================================================
 // Drawing Logs (MjProxy) Constants
 // ============================================================================

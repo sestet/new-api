@@ -20,7 +20,7 @@
 5. 上游后续修订账单时，在配置的复核期限内再次核对并修正用户扣费。
 6. 将额度精度提升到每美元 `100,000,000` 个 quota，即最小可表示 `$0.00000001`。
 
-精准计费的配置、匹配规则和重试行为见[上游精准计费](./upstream-billing.md)；数据库边界见[开发阶段数据库策略](./database.md)；生图工具见[GPT Image Playground 集成](./image-playground.md)；服务器部署见[Docker Compose 部署](./deployment.md)。
+精准计费的配置、匹配规则和重试行为见[上游精准计费](./upstream-billing.md)；日志分类和统计口径见[日志与使用统计](./usage-logs.md)；数据库边界见[开发阶段数据库策略](./database.md)；生图工具见[GPT Image Playground 集成](./image-playground.md)；服务器部署见[Docker Compose 部署](./deployment.md)。
 
 ## 改动地图
 
@@ -39,7 +39,7 @@
 | 管理 API | `router/channel-router.go` | 上游账号的增删改查、连接测试、手动对账和账单类型检测 |
 | 渠道绑定 UI | `web/src/features/channels/` | “上游账号”页签只管理账号；绑定关系位于“编辑渠道 -> 精准计费” |
 | 日志与状态 | `web/src/features/usage-logs/`、`service/log_info_generate.go` | 展示“精确、预估、待确认、失败”，详情记录对账信息 |
-| 使用日志 | `controller/log.go`、`model/log.go`、`web/src/features/usage-logs/` | 流水页展示请求数、总消费、精准覆盖率、等待和失败；普通用户隐藏渠道与上游账号 |
+| 日志与使用统计 | `controller/log.go`、`model/log.go`、`web/src/features/usage-logs/`、`web/src/features/audit-logs/` | 使用记录只展示 API 请求流水并提供请求、Token、费用、精准覆盖率、趋势和维度分布；登录、管理操作和系统事件进入独立操作日志 |
 | 订阅用户管理 | `controller/subscription.go`、`model/subscription.go`、`web/src/features/subscriptions/` | 集中查看订阅用户、套餐、周期、下次重置、已用和剩余额度，并支持直接分配订阅 |
 | GPT Image Playground | `web/src/features/gpt-image-playground/`、`web/rsbuild.config.ts` | 选择当前用户已有 Token 和可用模型，通过同源 `/v1` 生图；图片历史只保存在用户隔离的浏览器 IndexedDB |
 | 金额显示 | `web/src/lib/currency.ts`、`web/src/lib/format.ts`、`web/src/features/dashboard/lib/charts.ts` | 适配 `1e8` 精度和 `int64` quota 的格式化与图表汇总 |

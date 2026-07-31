@@ -20,8 +20,8 @@ For commercial licensing, please contact support@quantumnous.com
  * Utility functions for usage logs feature
  */
 import {
-  getAllLogs,
-  getUserLogs,
+  getAllUsageLogs,
+  getUserUsageLogs,
   getAllMidjourneyLogs,
   getUserMidjourneyLogs,
   getAllTaskLogs,
@@ -264,7 +264,9 @@ export async function fetchLogsByCategory(
       columnFilters,
       isAdmin,
     })
-    return isAdmin ? await getAllLogs(params) : await getUserLogs(params)
+    return isAdmin
+      ? await getAllUsageLogs(params)
+      : await getUserUsageLogs(params)
   }
 
   // For drawing and task logs

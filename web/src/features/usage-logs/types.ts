@@ -290,6 +290,50 @@ export interface LogStatistics {
   failed: number
 }
 
+export interface UsageAnalyticsSummary {
+  request_count: number
+  error_count: number
+  refund_count: number
+  token_count: number
+  quota: number
+  exact: number
+  estimated: number
+  pending: number
+  failed: number
+}
+
+export interface UsageAnalyticsTrend {
+  timestamp: number
+  request_count: number
+  token_count: number
+  quota: number
+}
+
+export interface UsageAnalyticsDimension {
+  name: string
+  request_count: number
+  token_count: number
+  quota: number
+}
+
+export interface UsageAnalytics {
+  summary: UsageAnalyticsSummary
+  trend: UsageAnalyticsTrend[]
+  models: UsageAnalyticsDimension[]
+  groups: UsageAnalyticsDimension[]
+}
+
+export interface UsageFilterOptions {
+  models: string[]
+  groups: string[]
+  tokens: string[]
+  users: string[]
+  channels: Array<{
+    id: number
+    name: string
+  }>
+}
+
 // ============================================================================
 // Drawing Logs (MjProxy) Types
 // ============================================================================
@@ -391,6 +435,18 @@ export interface GetLogStatsResponse {
   success: boolean
   message?: string
   data?: LogStatistics
+}
+
+export interface GetUsageAnalyticsResponse {
+  success: boolean
+  message?: string
+  data?: UsageAnalytics
+}
+
+export interface GetUsageFilterOptionsResponse {
+  success: boolean
+  message?: string
+  data?: UsageFilterOptions
 }
 
 // ============================================================================
