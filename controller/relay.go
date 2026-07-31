@@ -158,12 +158,16 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 	// common.SetContextKey(c, constant.ContextKeyTokenCountMeta, meta)
 
-	if priceData.FreeModel && !helper.ShouldUseUpstreamBillingReconciliation(c, relayInfo) {
-		logger.LogInfo(c, fmt.Sprintf("模型 %s 免费，跳过预扣费", relayInfo.OriginModelName))
-	} else {
-		newAPIError = service.PreConsumeBilling(c, priceData.QuotaToPreConsume, relayInfo)
-		if newAPIError != nil {
-			return
+	// Exact billing reserves after channel selection because its stored cost
+	// rate belongs to the selected channel.
+	if !helper.ShouldUseUpstreamBillingReconciliation(c, relayInfo) {
+		if priceData.FreeModel {
+			logger.LogInfo(c, fmt.Sprintf("模型 %s 免费，跳过预扣费", relayInfo.OriginModelName))
+		} else {
+			newAPIError = service.PreConsumeBilling(c, priceData.QuotaToPreConsume, relayInfo)
+			if newAPIError != nil {
+				return
+			}
 		}
 	}
 
@@ -205,18 +209,9 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			break
 		}
 		if !finalPriceData.FreeModel || helper.ShouldUseUpstreamBillingReconciliation(c, relayInfo) {
-			if relayInfo.Billing == nil {
-				newAPIError = service.PreConsumeBilling(c, finalPriceData.QuotaToPreConsume, relayInfo)
-				if newAPIError != nil {
-					break
-				}
-			} else if reserveErr := relayInfo.Billing.Reserve(finalPriceData.QuotaToPreConsume); reserveErr != nil {
-				var reserveAPIError *types.NewAPIError
-				if errors.As(reserveErr, &reserveAPIError) {
-					newAPIError = reserveAPIError
-				} else {
-					newAPIError = types.NewError(reserveErr, types.ErrorCodeUpdateDataError, types.ErrOptionWithSkipRetry())
-				}
+			adjustedQuota := service.ApplyUpstreamCostRateToEstimatedQuota(relayInfo, finalPriceData.QuotaToPreConsume)
+			newAPIError = service.ReserveBilling(c, adjustedQuota, relayInfo)
+			if newAPIError != nil {
 				break
 			}
 		}

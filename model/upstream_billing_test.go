@@ -90,6 +90,48 @@ func TestGetUpstreamBillingStatsSeparatesExactAndFallbackAmounts(t *testing.T) {
 	assert.InDelta(t, 0.0, stats.Channels[1].Coverage, 0.0001)
 }
 
+func TestGetUpstreamBillingAccountUsageStatsAggregatesDailyAndModels(t *testing.T) {
+	const credentialID = 9201
+	requestIDs := []string{"account-stats-exact", "account-stats-estimated"}
+	require.NoError(t, DB.Where("local_request_id IN ?", requestIDs).Delete(&UpstreamBillingRecord{}).Error)
+	t.Cleanup(func() {
+		_ = DB.Where("local_request_id IN ?", requestIDs).Delete(&UpstreamBillingRecord{}).Error
+	})
+	now := time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC)
+	records := []UpstreamBillingRecord{
+		{
+			LocalRequestId: "account-stats-exact", CredentialId: credentialID, Status: UpstreamBillingStatusExact,
+			CreatedAt: now.Add(-time.Hour).Unix(), LastCheckedAt: now.Add(-30 * time.Minute).Unix(), ModelName: "gpt-5.6",
+			TotalTokens: 120, UpstreamCostUSD: "0.1", ChargedQuota: 200, QuotaPerUnit: "1000",
+		},
+		{
+			LocalRequestId: "account-stats-estimated", CredentialId: credentialID, Status: UpstreamBillingStatusEstimated,
+			CreatedAt: now.Add(-25 * time.Hour).Unix(), ModelName: "gpt-5.6-mini",
+			TotalTokens: 80, ChargedQuota: 50, QuotaPerUnit: "1000",
+		},
+	}
+	require.NoError(t, DB.Create(&records).Error)
+	require.NoError(t, DB.Exec(
+		"UPDATE upstream_billing_records SET model_name = NULL, total_tokens = NULL WHERE local_request_id = ?",
+		"account-stats-estimated",
+	).Error)
+
+	stats, err := GetUpstreamBillingAccountUsageStats(credentialID, 2, now)
+
+	require.NoError(t, err)
+	assert.Equal(t, 2, stats.Requests)
+	assert.Equal(t, 1, stats.Exact)
+	assert.Equal(t, 1, stats.Estimated)
+	assert.EqualValues(t, 120, stats.TotalTokens)
+	assert.Equal(t, "0.1", stats.UpstreamCostUSD)
+	assert.Equal(t, "0.25", stats.MemberChargeUSD)
+	assert.InDelta(t, 0.5, stats.Coverage, 0.0001)
+	require.Len(t, stats.Daily, 2)
+	assert.Equal(t, "2026-07-30", stats.Daily[0].Key)
+	assert.Equal(t, "2026-07-31", stats.Daily[1].Key)
+	require.Len(t, stats.Models, 2)
+}
+
 func TestFindUpstreamBillingRecordsForCredentialReconcileScopesAndForcesRecentRecords(t *testing.T) {
 	const (
 		credentialID    = 9101

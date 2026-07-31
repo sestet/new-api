@@ -21,6 +21,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type recordingBillingSettler struct {
+	reservedQuota int64
+	reserveCalls  int
+}
+
+func (s *recordingBillingSettler) Settle(int64) error         { return nil }
+func (s *recordingBillingSettler) Refund(*gin.Context)        {}
+func (s *recordingBillingSettler) NeedsRefund() bool          { return false }
+func (s *recordingBillingSettler) GetPreConsumedQuota() int64 { return 0 }
+func (s *recordingBillingSettler) Reserve(quota int64) error {
+	s.reserveCalls++
+	s.reservedQuota = quota
+	return nil
+}
+
 func TestResolveUpstreamBillingQuotaUsesSub2APIActualCost(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	InitHttpClient()
@@ -58,9 +73,11 @@ func TestResolveUpstreamBillingQuotaUsesSub2APIActualCost(t *testing.T) {
 			ChannelBaseUrl: server.URL + "/v1",
 			ChannelOtherSettings: dto.ChannelOtherSettings{
 				UpstreamBilling: &dto.UpstreamBillingSettings{
-					Enabled:     true,
-					Provider:    dto.UpstreamBillingProviderSub2API,
-					AccessToken: "account-token",
+					Enabled:            true,
+					Provider:           dto.UpstreamBillingProviderSub2API,
+					AccessToken:        "account-token",
+					CostRateMultiplier: "0.13",
+					CostRateSource:     dto.UpstreamCostRateSourceSub2API,
 				},
 			},
 		},
@@ -75,7 +92,8 @@ func TestResolveUpstreamBillingQuotaUsesSub2APIActualCost(t *testing.T) {
 	var record model.UpstreamBillingRecord
 	require.NoError(t, model.DB.Where("local_request_id = ?", "local-request").First(&record).Error)
 	assert.EqualValues(t, 12000, record.ChargedQuota)
-	assert.EqualValues(t, 1234, record.EstimatedQuota)
+	assert.EqualValues(t, 160, record.EstimatedQuota)
+	assert.Equal(t, "0.13", record.CostRateMultiplier)
 	assert.EqualValues(t, "sub2api", record.Provider)
 	assert.Equal(t, "standard", record.UserGroup)
 	assert.Equal(t, "premium", record.UsingGroup)
@@ -87,6 +105,244 @@ func TestResolveUpstreamBillingQuotaUsesSub2APIActualCost(t *testing.T) {
 	assert.True(t, record.AdjustmentApplied)
 	assert.True(t, record.LogUpdated)
 	assert.Greater(t, record.NextRecheckAt, common.GetTimestamp())
+}
+
+func TestApplyUpstreamCostRateToEstimatedQuota(t *testing.T) {
+	tests := []struct {
+		name      string
+		rate      string
+		estimated int64
+		expected  int64
+	}{
+		{name: "increases reservation", rate: "2.5", estimated: 1000, expected: 2500},
+		{name: "applies fractional rate once", rate: "0.13", estimated: 10000, expected: 1300},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			info := &relaycommon.RelayInfo{
+				RelayFormat: types.RelayFormatOpenAI,
+				ChannelMeta: &relaycommon.ChannelMeta{ChannelOtherSettings: dto.ChannelOtherSettings{
+					UpstreamBilling: &dto.UpstreamBillingSettings{
+						Enabled:            true,
+						CostRateMultiplier: test.rate,
+					},
+				}},
+			}
+
+			quota := ApplyUpstreamCostRateToEstimatedQuota(info, test.estimated)
+
+			assert.EqualValues(t, test.expected, quota)
+			assert.Nil(t, info.QuotaClamp)
+		})
+	}
+}
+
+func TestApplyUpstreamCostRateLeavesUnsupportedRelayUnchanged(t *testing.T) {
+	info := &relaycommon.RelayInfo{
+		RelayFormat: types.RelayFormatOpenAIRealtime,
+		ChannelMeta: &relaycommon.ChannelMeta{ChannelOtherSettings: dto.ChannelOtherSettings{
+			UpstreamBilling: &dto.UpstreamBillingSettings{
+				Enabled:            true,
+				CostRateMultiplier: "2",
+			},
+		}},
+	}
+
+	quota := ApplyUpstreamCostRateToEstimatedQuota(info, 1000)
+
+	assert.EqualValues(t, 1000, quota)
+	assert.Nil(t, info.QuotaClamp)
+}
+
+func TestUpstreamCostRateRaisesPostChannelReservation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	billing := &recordingBillingSettler{}
+	info := &relaycommon.RelayInfo{
+		RelayFormat: types.RelayFormatOpenAI,
+		Billing:     billing,
+		ChannelMeta: &relaycommon.ChannelMeta{ChannelOtherSettings: dto.ChannelOtherSettings{
+			UpstreamBilling: &dto.UpstreamBillingSettings{
+				Enabled:            true,
+				CostRateMultiplier: "2",
+			},
+		}},
+	}
+
+	quota := ApplyUpstreamCostRateToEstimatedQuota(info, 1000)
+	apiErr := ReserveBilling(c, quota, info)
+
+	require.Nil(t, apiErr)
+	assert.EqualValues(t, 2000, billing.reservedQuota)
+	assert.Equal(t, 1, billing.reserveCalls)
+}
+
+func TestUpstreamCostRateOverflowIsRejectedBeforeReservation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	billing := &recordingBillingSettler{}
+	info := &relaycommon.RelayInfo{
+		RelayFormat: types.RelayFormatOpenAI,
+		Billing:     billing,
+		ChannelMeta: &relaycommon.ChannelMeta{ChannelOtherSettings: dto.ChannelOtherSettings{
+			UpstreamBilling: &dto.UpstreamBillingSettings{
+				Enabled:            true,
+				CostRateMultiplier: "2",
+			},
+		}},
+	}
+
+	quota := ApplyUpstreamCostRateToEstimatedQuota(info, common.MaxQuota)
+	apiErr := ReserveBilling(c, quota, info)
+
+	require.NotNil(t, apiErr)
+	require.NotNil(t, info.QuotaClamp)
+	assert.Equal(t, common.QuotaClampOverflow, info.QuotaClamp.Kind)
+	assert.Equal(t, types.ErrorCodeModelPriceError, apiErr.GetErrorCode())
+	assert.Equal(t, http.StatusBadRequest, apiErr.StatusCode)
+	assert.Equal(t, 0, billing.reserveCalls)
+}
+
+func TestResolveUpstreamBillingQuotaUsesDetectedRateOnlyForFallback(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	InitHttpClient()
+	require.NoError(t, model.DB.Where("local_request_id = ?", "rate-fallback-request").Delete(&model.UpstreamBillingRecord{}).Error)
+	t.Cleanup(func() {
+		_ = model.DB.Where("local_request_id = ?", "rate-fallback-request").Delete(&model.UpstreamBillingRecord{}).Error
+	})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"items":[]}}`))
+	}))
+	defer server.Close()
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	info := &relaycommon.RelayInfo{
+		RequestId:   "rate-fallback-request",
+		RelayFormat: types.RelayFormatOpenAIResponses,
+		UserGroup:   "default",
+		UsingGroup:  "default",
+		PriceData: types.PriceData{GroupRatioInfo: types.GroupRatioInfo{
+			GroupRatio: 1,
+			Source:     "group_ratio",
+		}},
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelBaseUrl: server.URL,
+			ChannelOtherSettings: dto.ChannelOtherSettings{UpstreamBilling: &dto.UpstreamBillingSettings{
+				Enabled:            true,
+				Provider:           dto.UpstreamBillingProviderSub2API,
+				AccessToken:        "account-token",
+				CostRateMultiplier: "0.13",
+				CostRateSource:     dto.UpstreamCostRateSourceSub2API,
+			}},
+		},
+	}
+
+	quota := ResolveUpstreamBillingQuota(ctx, info, 10000, &dto.Usage{PromptTokens: 100, CompletionTokens: 20, TotalTokens: 120})
+
+	assert.EqualValues(t, 1300, quota)
+	require.NotNil(t, info.UpstreamBillingAudit)
+	assert.Equal(t, "0.13", info.UpstreamBillingAudit.CostRateMultiplier)
+	assert.Equal(t, "sub2api", info.UpstreamBillingAudit.CostRateSource)
+	var record model.UpstreamBillingRecord
+	require.NoError(t, model.DB.Where("local_request_id = ?", "rate-fallback-request").First(&record).Error)
+	assert.EqualValues(t, 1300, record.EstimatedQuota)
+	assert.EqualValues(t, 120, record.TotalTokens)
+}
+
+func TestDetectUpstreamCostRateUsesChannelAPIKeyDeclaration(t *testing.T) {
+	InitHttpClient()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/v1/sub2api/billing", r.URL.Path)
+		assert.Equal(t, "Bearer sk-channel", r.Header.Get("Authorization"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"object":"sub2api.key_billing","schema_version":1,"billing_scope":"token","effective_rate_multiplier":0.13}`))
+	}))
+	defer server.Close()
+	channel := &model.Channel{Key: "sk-channel", BaseURL: common.GetPointer(server.URL + "/v1")}
+	settings := &dto.UpstreamBillingSettings{Provider: dto.UpstreamBillingProviderSub2API}
+	channel.SetOtherSettings(dto.ChannelOtherSettings{UpstreamBilling: settings})
+
+	result, err := DetectUpstreamCostRate(context.Background(), channel, settings)
+
+	require.NoError(t, err)
+	assert.Equal(t, "0.13", result.Multiplier)
+	assert.Equal(t, dto.UpstreamCostRateSourceSub2API, result.Source)
+}
+
+func TestProbeNewAPIManagementCostRateExplainsUnownedChannelKey(t *testing.T) {
+	InitHttpClient()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/user/self":
+			_, _ = w.Write([]byte(`{"success":true,"data":{"group":"default","role":1}}`))
+		case "/api/token/search":
+			assert.Equal(t, "channel-key", r.URL.Query().Get("token"))
+			_, _ = w.Write([]byte(`{"success":true,"data":{"total":0,"items":[]}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	_, err := probeNewAPIManagementCostRate(context.Background(), nil, server.URL, "sk-channel-key", &dto.UpstreamBillingSettings{
+		AccessToken: "account-token",
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "does not own the channel API key")
+}
+
+func TestProbeNewAPIManagementCostRateExplainsMissingObservedRateForNonRootAccount(t *testing.T) {
+	InitHttpClient()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/user/self":
+			_, _ = w.Write([]byte(`{"success":true,"data":{"group":"default","role":10}}`))
+		case "/api/token/search":
+			_, _ = w.Write([]byte(`{"success":true,"data":{"items":[{"group":"premium"}]}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	_, err := probeNewAPIManagementCostRate(context.Background(), nil, server.URL, "sk-channel-key", &dto.UpstreamBillingSettings{
+		AccessToken: "account-token",
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "has no usable billing log for this key group")
+}
+
+func TestProbeNewAPIManagementCostRateUsesLatestOwnedGroupLogForNonRootAccount(t *testing.T) {
+	InitHttpClient()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/user/self":
+			_, _ = w.Write([]byte(`{"success":true,"data":{"group":"default","role":10}}`))
+		case "/api/token/search":
+			_, _ = w.Write([]byte(`{"success":true,"data":{"items":[{"id":42,"name":"channel key","group":"premium"}]}}`))
+		case "/api/log/self":
+			assert.Equal(t, "premium", r.URL.Query().Get("group"))
+			assert.Equal(t, "2", r.URL.Query().Get("type"))
+			_, _ = w.Write([]byte(`{"success":true,"data":{"items":[{"group":"other","other":"{\"group_ratio\":0.8}"},{"group":"premium","other":"{\"group_ratio\":0.13}"}]}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	rate, err := probeNewAPIManagementCostRate(context.Background(), nil, server.URL, "sk-channel-key", &dto.UpstreamBillingSettings{
+		AccessToken: "account-token",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "0.13", rate.String())
 }
 
 func TestResolveUpstreamBillingQuotaContinuesAfterRequestContextCancellation(t *testing.T) {

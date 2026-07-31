@@ -63,18 +63,20 @@ func AttachUpstreamBillingAudit(relayInfo *relaycommon.RelayInfo, other map[stri
 			other["admin_info"] = adminInfo
 		}
 		billingInfo := map[string]interface{}{
-			"provider":            audit.Provider,
-			"status":              audit.Status,
-			"upstream_request_id": audit.UpstreamRequestId,
-			"identity_ambiguous":  audit.IdentityAmbiguous,
-			"estimated_quota":     audit.EstimatedQuota,
-			"charged_quota":       audit.ChargedQuota,
-			"attempts":            audit.Attempts,
-			"user_group":          audit.UserGroup,
-			"using_group":         audit.UsingGroup,
-			"group_ratio":         audit.GroupRatio,
-			"group_ratio_source":  audit.GroupRatioSource,
-			"quota_per_unit":      audit.QuotaPerUnit,
+			"provider":             audit.Provider,
+			"status":               audit.Status,
+			"upstream_request_id":  audit.UpstreamRequestId,
+			"identity_ambiguous":   audit.IdentityAmbiguous,
+			"estimated_quota":      audit.EstimatedQuota,
+			"charged_quota":        audit.ChargedQuota,
+			"attempts":             audit.Attempts,
+			"user_group":           audit.UserGroup,
+			"using_group":          audit.UsingGroup,
+			"group_ratio":          audit.GroupRatio,
+			"group_ratio_source":   audit.GroupRatioSource,
+			"quota_per_unit":       audit.QuotaPerUnit,
+			"cost_rate_multiplier": audit.CostRateMultiplier,
+			"cost_rate_source":     audit.CostRateSource,
 		}
 		if audit.CredentialId > 0 {
 			billingInfo["credential_id"] = audit.CredentialId

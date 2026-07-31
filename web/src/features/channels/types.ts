@@ -141,6 +141,11 @@ export interface UpstreamBillingSettings {
   recheck_window_hours?: number
   upstream_token_id?: string
   upstream_token_name?: string
+  cost_rate_auto?: boolean
+  cost_rate_multiplier?: string
+  cost_rate_source?: 'default' | 'manual' | 'new_api' | 'sub2api'
+  cost_rate_updated_at?: number
+  cost_rate_error?: string
 }
 
 export interface UpstreamBillingAccount {
@@ -171,6 +176,34 @@ export interface UpstreamBillingAccountInput {
   refresh_token?: string
   user_id?: number
   enabled: boolean
+}
+
+export interface UpstreamBillingUsageBucket {
+  key: string
+  requests: number
+  exact: number
+  total_tokens: number
+  upstream_cost_usd: string
+  member_charge_usd: string
+}
+
+export interface UpstreamBillingAccountUsageStats {
+  credential_id: number
+  days: number
+  from: number
+  to: number
+  requests: number
+  exact: number
+  estimated: number
+  pending: number
+  failed: number
+  total_tokens: number
+  upstream_cost_usd: string
+  member_charge_usd: string
+  coverage: number
+  last_checked_at: number
+  daily: UpstreamBillingUsageBucket[]
+  models: UpstreamBillingUsageBucket[]
 }
 
 export interface AdvancedCustomConfig {

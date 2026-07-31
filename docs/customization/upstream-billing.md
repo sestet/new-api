@@ -14,6 +14,34 @@
 
 请求创建时会保存用户分组、实际使用分组、最终倍率、倍率来源和 `QuotaPerUnit`。即时结算、后台对账和账单二次复核始终读取这份快照，管理员后来修改倍率或额度精度不会追溯改变历史请求。
 
+## 上游成本倍率
+
+渠道绑定上游账号后，可以自动探测上游 API Key 声明的成本倍率，也可以切换为手动倍率。自动模式默认每 360 分钟刷新一次；探测失败时保留最后一次有效倍率，并记录错误供管理员查看。
+
+请求计费读取渠道中已经保存的倍率，不会在每次请求过程中等待远程探测。自动模式也允许管理员预先填写本地默认倍率：尚未取得探测结果时使用该值；没有填写时回退为 `1`。探测成功后以探测值覆盖当前倍率，探测失败则继续保留当前有效值。手动模式始终使用管理员填写的倍率。系统先确定实际渠道，再在向上游发送请求前按该渠道倍率完成预扣，不存在“未拿到远程倍率就不扣费”的窗口。
+
+探测顺序：
+
+- Sub2API 使用渠道 API Key 请求 `GET /v1/sub2api/billing`。
+- New API 优先使用渠道 API Key 请求 `GET /v1/new-api/billing`。
+- 旧版 New API 没有公开声明接口时，兼容路径会使用已配置的上游账号凭证确认 Key 所有权和 Key 分组。普通账号会读取该账号在同一使用分组下最新一条消费日志中的 `group_ratio`；目标 Key 自身不必已经产生记录。上游 root 账号则直接读取当前 `GroupRatio` / `GroupGroupRatio` 配置。
+- 消费日志倍率是最近一次实际使用时的观测值，不是上游当前配置的声明值。上游修改倍率后，普通账号要等同一分组再次产生消费记录才能探测到新值；分组从未产生过记录时继续使用渠道手动默认倍率。
+- 多 Key 渠道要求所有 Key 返回相同倍率；不一致时拒绝更新，避免随机路由导致计费口径变化。
+
+该倍率只修正“尚未取得真实账单时”的本地临时预估：
+
+```text
+临时预估 = 本地模型预估成本 x 上游成本倍率 x 本地成员分组倍率
+```
+
+上游返回的 `actual_cost` 或由上游日志 quota 换算出的真实美元成本已经包含上游定价，因此精确结算不会再次乘上游成本倍率：
+
+```text
+精确结算 = 上游真实成本 x 本地成员分组倍率
+```
+
+本站同时公开 `GET /v1/new-api/billing`。API Key 持有者可读取该 Key 当前解析出的有效倍率，但不会获得完整分组配置或其他 Key 信息。
+
 ## 账号与渠道关系
 
 - “上游账号”保存一个上游站点登录账号的账单访问凭证。
@@ -23,6 +51,7 @@
 - “上游账号”页签只负责创建、编辑、测试、查看状态、主动对账和删除账号，不在此处维护绑定关系。
 - 已被渠道引用的账号不能删除，必须先在各渠道中选择“不绑定”。
 - 上游账号本身没有代理配置。实际账单查询会沿用对应渠道的代理；账号列表中的独立连接测试为直接访问。
+- 上游账号列表的“使用统计”按 7 天或 30 天汇总请求数、token、精确覆盖率、上游成本和成员扣费，并提供每日及模型维度明细。
 
 每个渠道可以单独控制是否二次复核及复核期限，因此同一个账号下的 OpenAI 渠道和 Claude 渠道可以共享登录凭证，同时保留各自的 API Key 和复核策略。
 
@@ -122,6 +151,8 @@ token 数用于定位账单，不用于覆盖上游真实金额。上游的模�
 | `UPSTREAM_BILLING_RECONCILE_LOOKBACK_DAYS` | `30` | 自动和手动对账的回看天数，非法值回退到 30 |
 | `SUB2API_TOKEN_REFRESH_TASK_ENABLED` | `true` | 是否启用 Sub2API token 自动刷新 |
 | `SUB2API_TOKEN_REFRESH_TASK_INTERVAL_MINUTES` | `15` | token 刷新检查间隔，非法值回退到 15 |
+| `UPSTREAM_COST_RATE_REFRESH_TASK_ENABLED` | `true` | 是否启用上游成本倍率自动刷新 |
+| `UPSTREAM_COST_RATE_REFRESH_TASK_INTERVAL_MINUTES` | `360` | 上游成本倍率刷新间隔，最小 5 分钟 |
 
 ## 数据和幂等性
 
@@ -150,6 +181,8 @@ PUT    /api/channel/upstream_billing/accounts/:id
 DELETE /api/channel/upstream_billing/accounts/:id
 POST   /api/channel/upstream_billing/accounts/:id/test
 POST   /api/channel/upstream_billing/accounts/:id/reconcile
+GET    /api/channel/upstream_billing/accounts/:id/stats?days=30
+POST   /api/channel/:id/upstream_billing/rate/detect
 ```
 
 ## 常见错误
@@ -157,6 +190,8 @@ POST   /api/channel/upstream_billing/accounts/:id/reconcile
 - `New-Api-User header not provided`：该 New API 版本要求填写上游账号用户 ID。
 - `401 Unauthorized`：token 无效、已过期，或 Sub2API refresh token 已被其他客户端轮换。
 - `404`：账单 Base URL 或该上游实现的接口路径不正确；系统不会擅自切换域名。
+- `configured new-api account does not own the channel API key`：旧版 New API 的账号接口只能搜索当前账号自己的 Key。改用 Key 所属账号；失败期间仍保留渠道当前的手动/最近有效倍率。
+- `has no usable billing log for this key group`：普通上游账号可以从同一使用分组的最新消费日志观测倍率，但该分组还没有包含 `group_ratio` 的记录。先让该分组完成一次请求再探测，或继续使用手动默认倍率。
 - `context deadline exceeded`：账单接口在 15 秒内未完成，当前请求先按预估结算，后台继续重试。
 - `record not available`：账单尚未生成，或请求 ID/token/时间特征无法对应到唯一记录，不等同于永久丢单。
 - `signature is not unique`：同一时间窗口存在多条完全相同的候选账单，为防误扣不会自动选择。

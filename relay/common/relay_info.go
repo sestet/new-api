@@ -61,25 +61,27 @@ type ResponsesUsageInfo struct {
 }
 
 type UpstreamBillingAudit struct {
-	Enabled           bool
-	CredentialId      int
-	Provider          string
-	Status            string
-	UpstreamRequestId string
-	IdentityAmbiguous bool
-	UpstreamCostUSD   string
-	UpstreamQuota     int64
-	UpstreamCostQuota int64
-	MarginQuota       int64
-	EstimatedQuota    int64
-	ChargedQuota      int64
-	UserGroup         string
-	UsingGroup        string
-	GroupRatio        string
-	GroupRatioSource  string
-	QuotaPerUnit      string
-	Attempts          int
-	Error             string
+	Enabled            bool
+	CredentialId       int
+	Provider           string
+	Status             string
+	UpstreamRequestId  string
+	IdentityAmbiguous  bool
+	UpstreamCostUSD    string
+	UpstreamQuota      int64
+	UpstreamCostQuota  int64
+	MarginQuota        int64
+	EstimatedQuota     int64
+	ChargedQuota       int64
+	UserGroup          string
+	UsingGroup         string
+	GroupRatio         string
+	GroupRatioSource   string
+	QuotaPerUnit       string
+	CostRateMultiplier string
+	CostRateSource     string
+	Attempts           int
+	Error              string
 }
 
 type ChannelMeta struct {

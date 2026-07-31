@@ -23,6 +23,7 @@ const (
 	SystemTaskTypeAsyncTaskPoll            = "async_task_poll"
 	SystemTaskTypeUpstreamBillingReconcile = "upstream_billing_reconcile"
 	SystemTaskTypeSub2APITokenRefresh      = "sub2api_token_refresh"
+	SystemTaskTypeUpstreamCostRateRefresh  = "upstream_cost_rate_refresh"
 )
 
 var ErrSystemTaskLockLost = errors.New("system task lock lost")

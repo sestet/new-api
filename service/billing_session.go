@@ -171,6 +171,12 @@ func (s *BillingSession) GetPreConsumedQuota() int64 {
 func (s *BillingSession) Reserve(targetQuota int64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.relayInfo != nil && s.relayInfo.QuotaClamp != nil {
+		return s.relayInfo.QuotaClamp
+	}
+	if targetQuota < 0 {
+		return fmt.Errorf("pre-consume quota cannot be negative: %d", targetQuota)
+	}
 
 	if s.settled || s.refunded || s.trusted || targetQuota <= s.preConsumedQuota {
 		return nil

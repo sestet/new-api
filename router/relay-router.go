@@ -41,6 +41,11 @@ func SetRelayRouter(router *gin.Engine) {
 		})
 	}
 
+	keyBillingRouter := router.Group("/v1/new-api/billing")
+	keyBillingRouter.Use(middleware.RouteTag("relay"))
+	keyBillingRouter.Use(middleware.TokenAuth())
+	keyBillingRouter.GET("", controller.GetKeyBillingDeclaration)
+
 	geminiRouter := router.Group("/v1beta/models")
 	geminiRouter.Use(middleware.RouteTag("relay"))
 	geminiRouter.Use(middleware.TokenAuth())

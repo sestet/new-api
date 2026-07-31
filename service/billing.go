@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -16,9 +17,7 @@ const (
 	BillingSourceChannelTest  = "channel_test"
 )
 
-// PreConsumeBilling 根据用户计费偏好创建 BillingSession 并执行预扣费。
-// 会话存储在 relayInfo.Billing 上，供后续 Settle / Refund 使用。
-func PreConsumeBilling(c *gin.Context, preConsumedQuota int64, relayInfo *relaycommon.RelayInfo) *types.NewAPIError {
+func validatePreConsumeQuota(preConsumedQuota int64, relayInfo *relaycommon.RelayInfo) *types.NewAPIError {
 	if relayInfo != nil && relayInfo.QuotaClamp != nil {
 		return types.NewErrorWithStatusCode(
 			relayInfo.QuotaClamp,
@@ -35,11 +34,39 @@ func PreConsumeBilling(c *gin.Context, preConsumedQuota int64, relayInfo *relayc
 			types.ErrOptionWithSkipRetry(),
 		)
 	}
+	return nil
+}
+
+// PreConsumeBilling 根据用户计费偏好创建 BillingSession 并执行预扣费。
+// 会话存储在 relayInfo.Billing 上，供后续 Settle / Refund 使用。
+func PreConsumeBilling(c *gin.Context, preConsumedQuota int64, relayInfo *relaycommon.RelayInfo) *types.NewAPIError {
+	if apiErr := validatePreConsumeQuota(preConsumedQuota, relayInfo); apiErr != nil {
+		return apiErr
+	}
 	session, apiErr := NewBillingSession(c, relayInfo, preConsumedQuota)
 	if apiErr != nil {
 		return apiErr
 	}
 	relayInfo.Billing = session
+	return nil
+}
+
+// ReserveBilling creates the billing session or raises its reservation to the
+// post-channel estimate while preserving the same validation and API errors.
+func ReserveBilling(c *gin.Context, targetQuota int64, relayInfo *relaycommon.RelayInfo) *types.NewAPIError {
+	if apiErr := validatePreConsumeQuota(targetQuota, relayInfo); apiErr != nil {
+		return apiErr
+	}
+	if relayInfo == nil || relayInfo.Billing == nil {
+		return PreConsumeBilling(c, targetQuota, relayInfo)
+	}
+	if err := relayInfo.Billing.Reserve(targetQuota); err != nil {
+		var apiErr *types.NewAPIError
+		if errors.As(err, &apiErr) {
+			return apiErr
+		}
+		return types.NewError(err, types.ErrorCodeUpdateDataError, types.ErrOptionWithSkipRetry())
+	}
 	return nil
 }
 

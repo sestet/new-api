@@ -129,6 +129,7 @@ import { useAuthStore } from '@/stores/auth-store'
 
 import {
   fetchModels,
+  detectChannelUpstreamCostRate,
   getAllModels,
   getChannel,
   getChannelKey,
@@ -319,6 +320,11 @@ const SENSITIVE_FORM_FIELDS = [
   'upstream_billing_recheck_window_hours',
   'upstream_billing_token_id',
   'upstream_billing_token_name',
+  'upstream_billing_cost_rate_auto',
+  'upstream_billing_cost_rate_multiplier',
+  'upstream_billing_cost_rate_source',
+  'upstream_billing_cost_rate_updated_at',
+  'upstream_billing_cost_rate_error',
 ] satisfies (keyof ChannelFormValues)[]
 
 function readAdvancedSettingsPreference(): boolean {
@@ -778,6 +784,19 @@ export function ChannelMutateDrawer({
   const currentUpstreamBillingRecheckEnabled = form.watch(
     'upstream_billing_recheck_enabled'
   )
+  const currentUpstreamBillingCostRateAuto = form.watch(
+    'upstream_billing_cost_rate_auto'
+  )
+  const currentUpstreamBillingCostRateSource = form.watch(
+    'upstream_billing_cost_rate_source'
+  )
+  const currentUpstreamBillingCostRateUpdatedAt = form.watch(
+    'upstream_billing_cost_rate_updated_at'
+  )
+  const currentUpstreamBillingCostRateError = form.watch(
+    'upstream_billing_cost_rate_error'
+  )
+  const [detectingCostRate, setDetectingCostRate] = useState(false)
   const currentSystemPrompt = form.watch('system_prompt')
   const currentSystemPromptOverride = form.watch('system_prompt_override')
   const currentAllowServiceTier = form.watch('allow_service_tier')
@@ -800,6 +819,48 @@ export function ChannelMutateDrawer({
   const selectedUpstreamBillingAccount = upstreamBillingAccounts.find(
     (account) => account.id === currentUpstreamBillingCredentialId
   )
+
+  const handleDetectCostRate = useCallback(async () => {
+    if (!channelId) return
+    setDetectingCostRate(true)
+    try {
+      const response = await detectChannelUpstreamCostRate(channelId)
+      if (!response.success || !response.data) {
+        toast.error(
+          response.message || t('Failed to detect upstream cost rate')
+        )
+        return
+      }
+      form.setValue(
+        'upstream_billing_cost_rate_multiplier',
+        response.data.multiplier,
+        { shouldDirty: false }
+      )
+      form.setValue('upstream_billing_cost_rate_source', response.data.source, {
+        shouldDirty: false,
+      })
+      form.setValue(
+        'upstream_billing_cost_rate_updated_at',
+        response.data.observed_at,
+        { shouldDirty: false }
+      )
+      form.setValue('upstream_billing_cost_rate_error', '', {
+        shouldDirty: false,
+      })
+      queryClient.invalidateQueries({
+        queryKey: channelsQueryKeys.detail(channelId),
+      })
+      toast.success(t('Upstream cost rate detected'))
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : t('Failed to detect upstream cost rate')
+      )
+    } finally {
+      setDetectingCostRate(false)
+    }
+  }, [channelId, form, queryClient, t])
   const upstreamBillingAccountOptions = useMemo(() => {
     const options = [
       {
@@ -3448,59 +3509,164 @@ export function ChannelMutateDrawer({
                             />
 
                             {currentUpstreamBillingCredentialId > 0 && (
-                              <div className='grid gap-4 sm:grid-cols-2'>
-                                <FormField
-                                  control={form.control}
-                                  name='upstream_billing_recheck_enabled'
-                                  render={({ field }) => (
-                                    <FormItem
-                                      className={sideDrawerSwitchItemClassName()}
-                                    >
-                                      <FormLabel>
-                                        {t('Recheck exact upstream bills')}
-                                      </FormLabel>
-                                      <FormControl>
-                                        <Switch
-                                          checked={field.value !== false}
-                                          onCheckedChange={field.onChange}
-                                        />
-                                      </FormControl>
-                                    </FormItem>
+                              <div className='space-y-4'>
+                                <div className='grid gap-4 sm:grid-cols-2'>
+                                  <FormField
+                                    control={form.control}
+                                    name='upstream_billing_cost_rate_auto'
+                                    render={({ field }) => (
+                                      <FormItem
+                                        className={sideDrawerSwitchItemClassName()}
+                                      >
+                                        <FormLabel>
+                                          {t('Automatic upstream cost rate')}
+                                        </FormLabel>
+                                        <FormControl>
+                                          <Switch
+                                            checked={field.value !== false}
+                                            onCheckedChange={field.onChange}
+                                          />
+                                        </FormControl>
+                                      </FormItem>
+                                    )}
+                                  />
+                                  <FormField
+                                    control={form.control}
+                                    name='upstream_billing_cost_rate_multiplier'
+                                    render={({ field }) => (
+                                      <FormItem>
+                                        <FormLabel>
+                                          {t('Upstream cost rate')}
+                                        </FormLabel>
+                                        <div className='flex gap-2'>
+                                          <FormControl>
+                                            <Input
+                                              type='number'
+                                              min='0.00000001'
+                                              step='any'
+                                              value={field.value || '1'}
+                                              onChange={(event) => {
+                                                field.onChange(event)
+                                                if (
+                                                  currentUpstreamBillingCostRateAuto !==
+                                                  false
+                                                ) {
+                                                  form.setValue(
+                                                    'upstream_billing_cost_rate_source',
+                                                    'manual',
+                                                    { shouldDirty: true }
+                                                  )
+                                                  form.setValue(
+                                                    'upstream_billing_cost_rate_updated_at',
+                                                    0,
+                                                    { shouldDirty: true }
+                                                  )
+                                                }
+                                              }}
+                                            />
+                                          </FormControl>
+                                          {currentUpstreamBillingCostRateAuto !==
+                                            false && (
+                                            <Button
+                                              type='button'
+                                              variant='outline'
+                                              disabled={
+                                                !channelId || detectingCostRate
+                                              }
+                                              onClick={handleDetectCostRate}
+                                            >
+                                              <RefreshCw
+                                                data-icon='inline-start'
+                                                className={cn(
+                                                  detectingCostRate &&
+                                                    'animate-spin'
+                                                )}
+                                              />
+                                              {t('Detect')}
+                                            </Button>
+                                          )}
+                                        </div>
+                                        <FormMessage />
+                                      </FormItem>
+                                    )}
+                                  />
+                                </div>
+                                <div className='text-muted-foreground flex flex-wrap items-center gap-2 text-xs'>
+                                  <Badge variant='outline'>
+                                    {t('Source')}:{' '}
+                                    {currentUpstreamBillingCostRateSource ||
+                                      'default'}
+                                  </Badge>
+                                  {(currentUpstreamBillingCostRateUpdatedAt ||
+                                    0) > 0 && (
+                                    <span>
+                                      {t('Last detected')}:{' '}
+                                      {new Date(
+                                        (currentUpstreamBillingCostRateUpdatedAt ||
+                                          0) * 1000
+                                      ).toLocaleString()}
+                                    </span>
                                   )}
-                                />
-                                <FormField
-                                  control={form.control}
-                                  name='upstream_billing_recheck_window_hours'
-                                  render={({ field }) => (
-                                    <FormItem>
-                                      <FormLabel>
-                                        {t('Recheck window')}
-                                      </FormLabel>
-                                      <FormControl>
-                                        <Input
-                                          type='number'
-                                          min={1}
-                                          max={720}
-                                          step={1}
-                                          disabled={
-                                            currentUpstreamBillingRecheckEnabled ===
-                                            false
-                                          }
-                                          value={field.value || 24}
-                                          onChange={(event) =>
-                                            field.onChange(
-                                              Number(event.target.value)
-                                            )
-                                          }
-                                        />
-                                      </FormControl>
-                                      <FormDescription>
-                                        {t('hours')}
-                                      </FormDescription>
-                                      <FormMessage />
-                                    </FormItem>
+                                  {currentUpstreamBillingCostRateError && (
+                                    <span className='text-destructive'>
+                                      {currentUpstreamBillingCostRateError}
+                                    </span>
                                   )}
-                                />
+                                </div>
+                                <div className='grid gap-4 sm:grid-cols-2'>
+                                  <FormField
+                                    control={form.control}
+                                    name='upstream_billing_recheck_enabled'
+                                    render={({ field }) => (
+                                      <FormItem
+                                        className={sideDrawerSwitchItemClassName()}
+                                      >
+                                        <FormLabel>
+                                          {t('Recheck exact upstream bills')}
+                                        </FormLabel>
+                                        <FormControl>
+                                          <Switch
+                                            checked={field.value !== false}
+                                            onCheckedChange={field.onChange}
+                                          />
+                                        </FormControl>
+                                      </FormItem>
+                                    )}
+                                  />
+                                  <FormField
+                                    control={form.control}
+                                    name='upstream_billing_recheck_window_hours'
+                                    render={({ field }) => (
+                                      <FormItem>
+                                        <FormLabel>
+                                          {t('Recheck window')}
+                                        </FormLabel>
+                                        <FormControl>
+                                          <Input
+                                            type='number'
+                                            min={1}
+                                            max={720}
+                                            step={1}
+                                            disabled={
+                                              currentUpstreamBillingRecheckEnabled ===
+                                              false
+                                            }
+                                            value={field.value || 24}
+                                            onChange={(event) =>
+                                              field.onChange(
+                                                Number(event.target.value)
+                                              )
+                                            }
+                                          />
+                                        </FormControl>
+                                        <FormDescription>
+                                          {t('hours')}
+                                        </FormDescription>
+                                        <FormMessage />
+                                      </FormItem>
+                                    )}
+                                  />
+                                </div>
                               </div>
                             )}
                           </fieldset>

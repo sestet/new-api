@@ -1,12 +1,16 @@
 package model
 
 import (
+	"database/sql"
 	"errors"
 	"sort"
+	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 
+	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -40,6 +44,12 @@ type UpstreamBillingRecord struct {
 	GroupRatio          string `json:"group_ratio" gorm:"type:varchar(64)"`
 	GroupRatioSource    string `json:"group_ratio_source" gorm:"type:varchar(32)"`
 	QuotaPerUnit        string `json:"quota_per_unit" gorm:"type:varchar(64)"`
+	CostRateMultiplier  string `json:"cost_rate_multiplier" gorm:"type:varchar(64)"`
+	CostRateSource      string `json:"cost_rate_source" gorm:"type:varchar(32)"`
+	ModelName           string `json:"model_name" gorm:"type:varchar(191);index"`
+	PromptTokens        int64  `json:"prompt_tokens" gorm:"type:bigint"`
+	CompletionTokens    int64  `json:"completion_tokens" gorm:"type:bigint"`
+	TotalTokens         int64  `json:"total_tokens" gorm:"type:bigint"`
 	Attempts            int    `json:"attempts"`
 	Error               string `json:"error" gorm:"type:text"`
 	AdjustmentApplied   bool   `json:"adjustment_applied" gorm:"index"`
@@ -144,7 +154,7 @@ func UpdateChannelUpstreamBillingCredentials(channelId int, update func(*dto.Ups
 
 func ListEnabledChannelsForUpstreamBillingCredentials() ([]Channel, error) {
 	channels := make([]Channel, 0)
-	err := DB.Select("id", "base_url", "setting", "settings").
+	err := DB.Select("id", "key", "base_url", "setting", "channel_info", "settings").
 		Where("status = ?", common.ChannelStatusEnabled).
 		Find(&channels).Error
 	return channels, err
@@ -473,6 +483,163 @@ type UpstreamBillingStats struct {
 	PendingQuota   int64                         `json:"pending_quota"`
 	Coverage       float64                       `json:"coverage"`
 	Channels       []UpstreamBillingChannelStats `json:"channels"`
+}
+
+type UpstreamBillingUsageBucket struct {
+	Key             string `json:"key"`
+	Requests        int    `json:"requests"`
+	Exact           int    `json:"exact"`
+	TotalTokens     int64  `json:"total_tokens"`
+	UpstreamCostUSD string `json:"upstream_cost_usd"`
+	MemberChargeUSD string `json:"member_charge_usd"`
+}
+
+type UpstreamBillingAccountUsageStats struct {
+	CredentialID    int                          `json:"credential_id"`
+	Days            int                          `json:"days"`
+	From            int64                        `json:"from"`
+	To              int64                        `json:"to"`
+	Requests        int                          `json:"requests"`
+	Exact           int                          `json:"exact"`
+	Estimated       int                          `json:"estimated"`
+	Pending         int                          `json:"pending"`
+	Failed          int                          `json:"failed"`
+	TotalTokens     int64                        `json:"total_tokens"`
+	UpstreamCostUSD string                       `json:"upstream_cost_usd"`
+	MemberChargeUSD string                       `json:"member_charge_usd"`
+	Coverage        float64                      `json:"coverage"`
+	LastCheckedAt   int64                        `json:"last_checked_at"`
+	Daily           []UpstreamBillingUsageBucket `json:"daily"`
+	Models          []UpstreamBillingUsageBucket `json:"models"`
+}
+
+func GetUpstreamBillingAccountUsageStats(credentialID int, days int, now time.Time) (UpstreamBillingAccountUsageStats, error) {
+	if credentialID <= 0 {
+		return UpstreamBillingAccountUsageStats{}, errors.New("upstream billing account ID is required")
+	}
+	if days < 1 || days > 90 {
+		return UpstreamBillingAccountUsageStats{}, errors.New("usage statistics days must be between 1 and 90")
+	}
+	if now.IsZero() {
+		now = time.Now()
+	}
+	to := now.Unix()
+	fromTime := now.AddDate(0, 0, -(days - 1))
+	fromTime = time.Date(fromTime.Year(), fromTime.Month(), fromTime.Day(), 0, 0, 0, 0, fromTime.Location())
+	from := fromTime.Unix()
+	stats := UpstreamBillingAccountUsageStats{
+		CredentialID: credentialID,
+		Days:         days,
+		From:         from,
+		To:           to,
+		Daily:        make([]UpstreamBillingUsageBucket, 0, days),
+		Models:       make([]UpstreamBillingUsageBucket, 0),
+	}
+	type accumulator struct {
+		bucket       UpstreamBillingUsageBucket
+		upstreamCost decimal.Decimal
+		memberCharge decimal.Decimal
+	}
+	daily := make(map[string]*accumulator, days)
+	for offset := 0; offset < days; offset++ {
+		key := fromTime.AddDate(0, 0, offset).Format("2006-01-02")
+		daily[key] = &accumulator{bucket: UpstreamBillingUsageBucket{Key: key}}
+	}
+	models := make(map[string]*accumulator)
+	rows, err := DB.Model(&UpstreamBillingRecord{}).
+		Select("created_at", "status", "upstream_cost_usd", "charged_quota", "quota_per_unit", "model_name", "total_tokens", "last_checked_at").
+		Where("credential_id = ? AND created_at >= ? AND created_at <= ?", credentialID, from, to).
+		Order("created_at asc").Rows()
+	if err != nil {
+		return UpstreamBillingAccountUsageStats{}, err
+	}
+	defer rows.Close()
+	totalUpstreamCost := decimal.Zero
+	totalMemberCharge := decimal.Zero
+	for rows.Next() {
+		var createdAt int64
+		var status string
+		var upstreamCostText, quotaPerUnitText, modelName sql.NullString
+		var chargedQuota, totalTokens, lastCheckedAt sql.NullInt64
+		if err := rows.Scan(&createdAt, &status, &upstreamCostText, &chargedQuota, &quotaPerUnitText, &modelName, &totalTokens, &lastCheckedAt); err != nil {
+			return UpstreamBillingAccountUsageStats{}, err
+		}
+		dateKey := time.Unix(createdAt, 0).In(now.Location()).Format("2006-01-02")
+		dayBucket, ok := daily[dateKey]
+		if !ok {
+			continue
+		}
+		resolvedModelName := strings.TrimSpace(modelName.String)
+		if resolvedModelName == "" {
+			resolvedModelName = "unknown"
+		}
+		modelBucket, ok := models[resolvedModelName]
+		if !ok {
+			modelBucket = &accumulator{bucket: UpstreamBillingUsageBucket{Key: resolvedModelName}}
+			models[resolvedModelName] = modelBucket
+		}
+		stats.Requests++
+		stats.TotalTokens += totalTokens.Int64
+		dayBucket.bucket.Requests++
+		dayBucket.bucket.TotalTokens += totalTokens.Int64
+		modelBucket.bucket.Requests++
+		modelBucket.bucket.TotalTokens += totalTokens.Int64
+		if lastCheckedAt.Int64 > stats.LastCheckedAt {
+			stats.LastCheckedAt = lastCheckedAt.Int64
+		}
+		switch status {
+		case UpstreamBillingStatusExact:
+			stats.Exact++
+			dayBucket.bucket.Exact++
+			modelBucket.bucket.Exact++
+		case UpstreamBillingStatusEstimated:
+			stats.Estimated++
+		case UpstreamBillingStatusPending:
+			stats.Pending++
+		case UpstreamBillingStatusFailed:
+			stats.Failed++
+		}
+		upstreamCost, costErr := decimal.NewFromString(strings.TrimSpace(upstreamCostText.String))
+		if costErr == nil && !upstreamCost.IsNegative() {
+			totalUpstreamCost = totalUpstreamCost.Add(upstreamCost)
+			dayBucket.upstreamCost = dayBucket.upstreamCost.Add(upstreamCost)
+			modelBucket.upstreamCost = modelBucket.upstreamCost.Add(upstreamCost)
+		}
+		quotaPerUnit, quotaErr := decimal.NewFromString(strings.TrimSpace(quotaPerUnitText.String))
+		if quotaErr == nil && quotaPerUnit.IsPositive() && chargedQuota.Int64 >= 0 {
+			memberCharge := decimal.NewFromInt(chargedQuota.Int64).Div(quotaPerUnit)
+			totalMemberCharge = totalMemberCharge.Add(memberCharge)
+			dayBucket.memberCharge = dayBucket.memberCharge.Add(memberCharge)
+			modelBucket.memberCharge = modelBucket.memberCharge.Add(memberCharge)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return UpstreamBillingAccountUsageStats{}, err
+	}
+	if stats.Requests > 0 {
+		stats.Coverage = float64(stats.Exact) / float64(stats.Requests)
+	}
+	stats.UpstreamCostUSD = totalUpstreamCost.String()
+	stats.MemberChargeUSD = totalMemberCharge.String()
+	for offset := 0; offset < days; offset++ {
+		key := fromTime.AddDate(0, 0, offset).Format("2006-01-02")
+		item := daily[key]
+		item.bucket.UpstreamCostUSD = item.upstreamCost.String()
+		item.bucket.MemberChargeUSD = item.memberCharge.String()
+		stats.Daily = append(stats.Daily, item.bucket)
+	}
+	for _, item := range models {
+		item.bucket.UpstreamCostUSD = item.upstreamCost.String()
+		item.bucket.MemberChargeUSD = item.memberCharge.String()
+		stats.Models = append(stats.Models, item.bucket)
+	}
+	sort.Slice(stats.Models, func(i, j int) bool {
+		if stats.Models[i].Requests == stats.Models[j].Requests {
+			return stats.Models[i].Key < stats.Models[j].Key
+		}
+		return stats.Models[i].Requests > stats.Models[j].Requests
+	})
+	return stats, nil
 }
 
 func GetUpstreamBillingStats() (UpstreamBillingStats, error) {

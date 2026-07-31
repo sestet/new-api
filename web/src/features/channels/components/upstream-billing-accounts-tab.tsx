@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
+  ChartNoAxesColumnIncreasing,
   CircleAlert,
   CircleCheck,
   CircleDashed,
@@ -66,6 +67,7 @@ import {
 } from '../api'
 import { getUpstreamBillingHealthPresentation } from '../lib/upstream-billing-health'
 import type { UpstreamBillingAccount } from '../types'
+import { UpstreamBillingAccountStatsDialog } from './dialogs/upstream-billing-account-stats-dialog'
 import { UpstreamBillingAccountDrawer } from './dialogs/upstream-billing-accounts-dialog'
 
 export function UpstreamBillingAccountsTab() {
@@ -85,6 +87,8 @@ export function UpstreamBillingAccountsTab() {
     number | null
   >(null)
   const [deletingAccount, setDeletingAccount] =
+    useState<UpstreamBillingAccount | null>(null)
+  const [statsAccount, setStatsAccount] =
     useState<UpstreamBillingAccount | null>(null)
 
   const accountsQuery = useQuery({
@@ -357,6 +361,22 @@ export function UpstreamBillingAccountsTab() {
                             <Button
                               type='button'
                               variant='ghost'
+                              size='icon-sm'
+                              aria-label={t('Usage statistics')}
+                              onClick={() => setStatsAccount(account)}
+                            />
+                          }
+                        >
+                          <ChartNoAxesColumnIncreasing />
+                        </TooltipTrigger>
+                        <TooltipContent>{t('Usage statistics')}</TooltipContent>
+                      </Tooltip>
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={
+                            <Button
+                              type='button'
+                              variant='ghost'
                               size='sm'
                               disabled={
                                 !canEditSensitive ||
@@ -454,6 +474,11 @@ export function UpstreamBillingAccountsTab() {
         open={editorOpen}
         account={editingAccount}
         onOpenChange={handleEditorOpenChange}
+      />
+      <UpstreamBillingAccountStatsDialog
+        open={statsAccount !== null}
+        account={statsAccount}
+        onOpenChange={(open) => !open && setStatsAccount(null)}
       />
       <ConfirmDialog
         open={deletingAccount !== null}

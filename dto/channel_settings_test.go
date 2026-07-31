@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -133,6 +134,36 @@ func TestUpstreamBillingSettingsValidateRecognizesSub2APIRefreshToken(t *testing
 	assert.Empty(t, settings.AccessToken)
 	assert.Equal(t, "rt_refresh-token", settings.RefreshToken)
 	assert.Equal(t, UpstreamBillingProviderSub2API, settings.DetectedProvider)
+}
+
+func TestUpstreamBillingSettingsCostRateDefaultsAndValidation(t *testing.T) {
+	settings := UpstreamBillingSettings{}
+	assert.True(t, settings.IsCostRateAuto())
+	assert.Equal(t, "1", settings.EffectiveCostRate().String())
+	assert.Equal(t, UpstreamCostRateSourceDefault, settings.EffectiveCostRateSource())
+
+	settings.CostRateMultiplier = "0.13"
+	settings.CostRateSource = UpstreamCostRateSourceSub2API
+	require.NoError(t, settings.Validate())
+	assert.Equal(t, "0.13", settings.EffectiveCostRate().String())
+
+	settings.CostRateMultiplier = "NaN"
+	assert.Error(t, settings.Validate())
+	settings.CostRateMultiplier = "-1"
+	assert.Error(t, settings.Validate())
+}
+
+func TestUpstreamBillingSettingsUsesManualFallbackWhileAutoDetectionIsEnabled(t *testing.T) {
+	settings := UpstreamBillingSettings{
+		CostRateAuto:       common.GetPointer(true),
+		CostRateMultiplier: "0.7",
+		CostRateSource:     UpstreamCostRateSourceManual,
+	}
+
+	require.NoError(t, settings.Validate())
+	assert.True(t, settings.IsCostRateAuto())
+	assert.Equal(t, "0.7", settings.EffectiveCostRate().String())
+	assert.Equal(t, UpstreamCostRateSourceManual, settings.EffectiveCostRateSource())
 }
 
 func TestAdvancedCustomValidateResponsesToChatConverterPath(t *testing.T) {

@@ -268,6 +268,11 @@ func ResolveChannelUpstreamBillingSettings(channel *Channel) (*dto.UpstreamBilli
 	accountSettings.RecheckWindowHours = channelSettings.RecheckWindowHours
 	accountSettings.UpstreamTokenID = channelSettings.UpstreamTokenID
 	accountSettings.UpstreamTokenName = channelSettings.UpstreamTokenName
+	accountSettings.CostRateAuto = channelSettings.CostRateAuto
+	accountSettings.CostRateMultiplier = channelSettings.CostRateMultiplier
+	accountSettings.CostRateSource = channelSettings.CostRateSource
+	accountSettings.CostRateUpdatedAt = channelSettings.CostRateUpdatedAt
+	accountSettings.CostRateError = channelSettings.CostRateError
 	return accountSettings, nil
 }
 

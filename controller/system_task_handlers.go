@@ -24,6 +24,7 @@ func RegisterScheduledSystemTasks() {
 	service.RegisterSystemTaskHandler(asyncTaskPollHandler{})
 	service.RegisterSystemTaskHandler(upstreamBillingReconcileHandler{})
 	service.RegisterSystemTaskHandler(sub2APITokenRefreshHandler{})
+	service.RegisterSystemTaskHandler(upstreamCostRateRefreshHandler{})
 }
 
 // channelTestHandler runs the scheduled "test all channels" job. Enablement and
@@ -227,6 +228,37 @@ func (sub2APITokenRefreshHandler) Run(ctx context.Context, task *model.SystemTas
 	if summary.Failed > 0 && summary.Refreshed == 0 {
 		status = model.SystemTaskStatusFailed
 		runErr = fmt.Errorf("failed to refresh %d sub2api billing credentials", summary.Failed)
+	}
+	finishSystemTaskHandler(task, runnerID, status, summary, runErr)
+}
+
+type upstreamCostRateRefreshHandler struct{}
+
+func (upstreamCostRateRefreshHandler) Type() string {
+	return model.SystemTaskTypeUpstreamCostRateRefresh
+}
+
+func (upstreamCostRateRefreshHandler) Enabled() bool {
+	return common.GetEnvOrDefaultBool("UPSTREAM_COST_RATE_REFRESH_TASK_ENABLED", true) && service.HasUpstreamCostRateRefreshWork()
+}
+
+func (upstreamCostRateRefreshHandler) Interval() time.Duration {
+	minutes := common.GetEnvOrDefault("UPSTREAM_COST_RATE_REFRESH_TASK_INTERVAL_MINUTES", 360)
+	if minutes < 5 {
+		minutes = 360
+	}
+	return time.Duration(minutes) * time.Minute
+}
+
+func (upstreamCostRateRefreshHandler) NewPayload() any { return nil }
+
+func (upstreamCostRateRefreshHandler) Run(ctx context.Context, task *model.SystemTask, runnerID string) {
+	summary := service.RefreshUpstreamCostRates(ctx, service.NewSystemTaskProgressReporter(task, runnerID))
+	status := model.SystemTaskStatusSucceeded
+	var runErr error
+	if summary.Failed > 0 && summary.Updated == 0 {
+		status = model.SystemTaskStatusFailed
+		runErr = fmt.Errorf("failed to refresh %d upstream cost rates", summary.Failed)
 	}
 	finishSystemTaskHandler(task, runnerID, status, summary, runErr)
 }

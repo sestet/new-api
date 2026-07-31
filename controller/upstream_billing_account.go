@@ -284,3 +284,34 @@ func ReconcileUpstreamBillingAccount(c *gin.Context) {
 		},
 	})
 }
+
+func GetUpstreamBillingAccountUsageStats(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil || id <= 0 {
+		common.ApiErrorMsg(c, "无效的上游账号 ID")
+		return
+	}
+	if _, err := model.GetUpstreamBillingAccountByID(id); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "上游账号不存在"})
+			return
+		}
+		common.ApiError(c, err)
+		return
+	}
+	days := 30
+	if value := strings.TrimSpace(c.Query("days")); value != "" {
+		parsed, parseErr := strconv.Atoi(value)
+		if parseErr != nil || parsed < 1 || parsed > 90 {
+			common.ApiErrorMsg(c, "统计天数必须在 1 到 90 之间")
+			return
+		}
+		days = parsed
+	}
+	stats, err := model.GetUpstreamBillingAccountUsageStats(id, days, time.Now())
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, stats)
+}

@@ -39,6 +39,7 @@ import type {
   SearchChannelsResponse,
   TagOperationParams,
   UpstreamBillingAccount,
+  UpstreamBillingAccountUsageStats,
   UpstreamBillingAccountInput,
 } from './types'
 
@@ -270,6 +271,45 @@ export async function reconcileUpstreamBillingAccount(
 ): Promise<UpstreamBillingReconcileResponse> {
   const res = await api.post(
     `/api/channel/upstream_billing/accounts/${id}/reconcile`,
+    undefined,
+    channelActionConfig()
+  )
+  return res.data
+}
+
+export async function getUpstreamBillingAccountUsageStats(
+  id: number,
+  days: number,
+  signal?: AbortSignal
+): Promise<{
+  success: boolean
+  message?: string
+  data?: UpstreamBillingAccountUsageStats
+}> {
+  const res = await api.get(
+    `/api/channel/upstream_billing/accounts/${id}/stats`,
+    {
+      params: { days },
+      signal,
+    }
+  )
+  if (!res.data.success || !res.data.data) {
+    throw new Error(res.data.message || 'Failed to load usage statistics')
+  }
+  return res.data
+}
+
+export async function detectChannelUpstreamCostRate(id: number): Promise<{
+  success: boolean
+  message?: string
+  data?: {
+    multiplier: string
+    source: 'manual' | 'new_api' | 'sub2api'
+    observed_at: number
+  }
+}> {
+  const res = await api.post(
+    `/api/channel/${id}/upstream_billing/rate/detect`,
     undefined,
     channelActionConfig()
   )

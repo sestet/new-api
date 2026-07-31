@@ -270,6 +270,13 @@ export const channelFormSchema = z
       .optional(),
     upstream_billing_token_id: z.string().optional(),
     upstream_billing_token_name: z.string().optional(),
+    upstream_billing_cost_rate_auto: z.boolean().optional(),
+    upstream_billing_cost_rate_multiplier: z.string().optional(),
+    upstream_billing_cost_rate_source: z
+      .enum(['default', 'manual', 'new_api', 'sub2api'])
+      .optional(),
+    upstream_billing_cost_rate_updated_at: z.number().int().optional(),
+    upstream_billing_cost_rate_error: z.string().optional(),
   })
   .superRefine((data, ctx) => {
     const upstreamBillingProvider = data.upstream_billing_provider || 'auto'
@@ -334,6 +341,14 @@ export const channelFormSchema = z
           'Upstream billing API base URL must be a valid HTTP URL'
         )
       }
+    }
+    const costRate = Number(data.upstream_billing_cost_rate_multiplier || '1')
+    if (!Number.isFinite(costRate) || costRate <= 0) {
+      addRequiredIssue(
+        ctx,
+        'upstream_billing_cost_rate_multiplier',
+        'Upstream cost rate must be a positive number'
+      )
     }
     if (
       !usesSharedCredential &&
@@ -509,6 +524,11 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   upstream_billing_recheck_window_hours: 24,
   upstream_billing_token_id: '',
   upstream_billing_token_name: '',
+  upstream_billing_cost_rate_auto: true,
+  upstream_billing_cost_rate_multiplier: '1',
+  upstream_billing_cost_rate_source: 'default',
+  upstream_billing_cost_rate_updated_at: 0,
+  upstream_billing_cost_rate_error: '',
   advanced_custom: '',
 }
 
@@ -581,6 +601,15 @@ export function transformChannelToFormDefaults(
   let upstreamBillingRecheckWindowHours = 24
   let upstreamBillingTokenId = ''
   let upstreamBillingTokenName = ''
+  let upstreamBillingCostRateAuto = true
+  let upstreamBillingCostRateMultiplier = '1'
+  let upstreamBillingCostRateSource:
+    | 'default'
+    | 'manual'
+    | 'new_api'
+    | 'sub2api' = 'default'
+  let upstreamBillingCostRateUpdatedAt = 0
+  let upstreamBillingCostRateError = ''
   let advancedCustom = ''
 
   if (channel.settings) {
@@ -633,6 +662,16 @@ export function transformChannelToFormDefaults(
       upstreamBillingTokenId = parsed.upstream_billing?.upstream_token_id || ''
       upstreamBillingTokenName =
         parsed.upstream_billing?.upstream_token_name || ''
+      upstreamBillingCostRateAuto =
+        parsed.upstream_billing?.cost_rate_auto !== false
+      upstreamBillingCostRateMultiplier =
+        parsed.upstream_billing?.cost_rate_multiplier || '1'
+      upstreamBillingCostRateSource =
+        parsed.upstream_billing?.cost_rate_source || 'default'
+      upstreamBillingCostRateUpdatedAt =
+        parsed.upstream_billing?.cost_rate_updated_at || 0
+      upstreamBillingCostRateError =
+        parsed.upstream_billing?.cost_rate_error || ''
       if (parsed.advanced_custom) {
         advancedCustom = stringifyAdvancedCustomConfig(parsed.advanced_custom)
       }
@@ -705,6 +744,11 @@ export function transformChannelToFormDefaults(
     upstream_billing_recheck_window_hours: upstreamBillingRecheckWindowHours,
     upstream_billing_token_id: upstreamBillingTokenId,
     upstream_billing_token_name: upstreamBillingTokenName,
+    upstream_billing_cost_rate_auto: upstreamBillingCostRateAuto,
+    upstream_billing_cost_rate_multiplier: upstreamBillingCostRateMultiplier,
+    upstream_billing_cost_rate_source: upstreamBillingCostRateSource,
+    upstream_billing_cost_rate_updated_at: upstreamBillingCostRateUpdatedAt,
+    upstream_billing_cost_rate_error: upstreamBillingCostRateError,
     advanced_custom: advancedCustom,
   }
 }
@@ -875,6 +919,16 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
     upstream_token_id: formData.upstream_billing_token_id?.trim() || undefined,
     upstream_token_name:
       formData.upstream_billing_token_name?.trim() || undefined,
+    cost_rate_auto: formData.upstream_billing_cost_rate_auto !== false,
+    cost_rate_multiplier:
+      formData.upstream_billing_cost_rate_multiplier?.trim() || '1',
+    cost_rate_source:
+      formData.upstream_billing_cost_rate_auto === false
+        ? 'manual'
+        : formData.upstream_billing_cost_rate_source || 'default',
+    cost_rate_updated_at:
+      formData.upstream_billing_cost_rate_updated_at || undefined,
+    cost_rate_error: formData.upstream_billing_cost_rate_error || undefined,
   }
 
   // Upstream model update settings (for model-fetchable channel types)

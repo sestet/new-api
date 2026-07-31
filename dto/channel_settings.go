@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/shopspring/decimal"
 )
 
 type ChannelSettings struct {
@@ -25,6 +26,15 @@ type VertexKeyType string
 const (
 	VertexKeyTypeJSON   VertexKeyType = "json"
 	VertexKeyTypeAPIKey VertexKeyType = "api_key"
+)
+
+type UpstreamCostRateSource string
+
+const (
+	UpstreamCostRateSourceDefault UpstreamCostRateSource = "default"
+	UpstreamCostRateSourceManual  UpstreamCostRateSource = "manual"
+	UpstreamCostRateSourceNewAPI  UpstreamCostRateSource = "new_api"
+	UpstreamCostRateSourceSub2API UpstreamCostRateSource = "sub2api"
 )
 
 type AwsKeyType string
@@ -60,6 +70,33 @@ type UpstreamBillingSettings struct {
 	RecheckWindowHours     int                     `json:"recheck_window_hours,omitempty"`
 	UpstreamTokenID        string                  `json:"upstream_token_id,omitempty"`
 	UpstreamTokenName      string                  `json:"upstream_token_name,omitempty"`
+	CostRateAuto           *bool                   `json:"cost_rate_auto,omitempty"`
+	CostRateMultiplier     string                  `json:"cost_rate_multiplier,omitempty"`
+	CostRateSource         UpstreamCostRateSource  `json:"cost_rate_source,omitempty"`
+	CostRateUpdatedAt      int64                   `json:"cost_rate_updated_at,omitempty"`
+	CostRateError          string                  `json:"cost_rate_error,omitempty"`
+}
+
+func (s *UpstreamBillingSettings) IsCostRateAuto() bool {
+	return s != nil && (s.CostRateAuto == nil || *s.CostRateAuto)
+}
+
+func (s *UpstreamBillingSettings) EffectiveCostRate() decimal.Decimal {
+	if s == nil {
+		return decimal.NewFromInt(1)
+	}
+	rate, err := decimal.NewFromString(strings.TrimSpace(s.CostRateMultiplier))
+	if err != nil || !rate.IsPositive() {
+		return decimal.NewFromInt(1)
+	}
+	return rate
+}
+
+func (s *UpstreamBillingSettings) EffectiveCostRateSource() UpstreamCostRateSource {
+	if s == nil || s.CostRateSource == "" {
+		return UpstreamCostRateSourceDefault
+	}
+	return s.CostRateSource
 }
 
 func (s *UpstreamBillingSettings) IsRecheckEnabled() bool {
@@ -108,6 +145,23 @@ func (s *UpstreamBillingSettings) Validate() error {
 	}
 	s.UpstreamTokenID = strings.TrimSpace(s.UpstreamTokenID)
 	s.UpstreamTokenName = strings.TrimSpace(s.UpstreamTokenName)
+	s.CostRateMultiplier = strings.TrimSpace(s.CostRateMultiplier)
+	s.CostRateError = strings.TrimSpace(s.CostRateError)
+	if s.CostRateMultiplier != "" {
+		rate, err := decimal.NewFromString(s.CostRateMultiplier)
+		if err != nil || !rate.IsPositive() {
+			return fmt.Errorf("upstream cost rate multiplier must be a positive finite number")
+		}
+	}
+	switch s.CostRateSource {
+	case "", UpstreamCostRateSourceDefault, UpstreamCostRateSourceManual, UpstreamCostRateSourceNewAPI, UpstreamCostRateSourceSub2API:
+	default:
+		return fmt.Errorf("unsupported upstream cost rate source: %s", s.CostRateSource)
+	}
+	if !s.IsCostRateAuto() && s.CostRateMultiplier == "" {
+		s.CostRateMultiplier = "1"
+		s.CostRateSource = UpstreamCostRateSourceManual
+	}
 	if s.RecheckWindowHours < 0 || s.RecheckWindowHours > 720 {
 		return fmt.Errorf("upstream billing recheck window must be between 1 and 720 hours")
 	}

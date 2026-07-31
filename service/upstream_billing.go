@@ -248,6 +248,369 @@ type UpstreamBillingDetectionResult struct {
 	AccessTokenExpiresAt int64                       `json:"access_token_expires_at,omitempty"`
 }
 
+type UpstreamCostRateDetectionResult struct {
+	Multiplier string                     `json:"multiplier"`
+	Source     dto.UpstreamCostRateSource `json:"source"`
+	ObservedAt int64                      `json:"observed_at"`
+}
+
+func parsePositiveCostRate(raw json.RawMessage) (decimal.Decimal, error) {
+	rate, err := parseBillingDecimal(raw)
+	if err != nil || !rate.IsPositive() {
+		return decimal.Zero, errors.New("upstream cost rate multiplier must be positive")
+	}
+	return rate, nil
+}
+
+func probeSub2APICostRate(ctx context.Context, info *relaycommon.RelayInfo, baseURL string, apiKey string) (decimal.Decimal, error) {
+	var response struct {
+		Object                  string          `json:"object"`
+		SchemaVersion           int             `json:"schema_version"`
+		BillingScope            string          `json:"billing_scope"`
+		EffectiveRateMultiplier json.RawMessage `json:"effective_rate_multiplier"`
+	}
+	requestURL := upstreamBillingURL(baseURL, "/v1/sub2api/billing", nil)
+	if err := doUpstreamBillingRequest(ctx, info, requestURL, apiKey, 0, &response); err != nil {
+		return decimal.Zero, err
+	}
+	if response.Object != "sub2api.key_billing" || response.SchemaVersion != 1 || response.BillingScope != "token" {
+		return decimal.Zero, errors.New("upstream returned an unsupported sub2api billing declaration")
+	}
+	return parsePositiveCostRate(response.EffectiveRateMultiplier)
+}
+
+func probeNewAPIPublicCostRate(ctx context.Context, info *relaycommon.RelayInfo, baseURL string, apiKey string) (decimal.Decimal, error) {
+	var response struct {
+		Object                  string          `json:"object"`
+		SchemaVersion           int             `json:"schema_version"`
+		BillingScope            string          `json:"billing_scope"`
+		EffectiveRateMultiplier json.RawMessage `json:"effective_rate_multiplier"`
+	}
+	requestURL := upstreamBillingURL(baseURL, "/v1/new-api/billing", nil)
+	if err := doUpstreamBillingRequest(ctx, info, requestURL, apiKey, 0, &response); err != nil {
+		return decimal.Zero, err
+	}
+	if response.Object != "new-api.key_billing" || response.SchemaVersion != 1 || response.BillingScope != "token" {
+		return decimal.Zero, errors.New("upstream returned an unsupported new-api billing declaration")
+	}
+	return parsePositiveCostRate(response.EffectiveRateMultiplier)
+}
+
+func probeNewAPIManagementCostRate(ctx context.Context, info *relaycommon.RelayInfo, baseURL string, apiKey string, settings *dto.UpstreamBillingSettings) (decimal.Decimal, error) {
+	if settings == nil || strings.TrimSpace(settings.AccessToken) == "" {
+		return decimal.Zero, errors.New("new-api management credential is unavailable for rate detection")
+	}
+	var userResponse struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Group string `json:"group"`
+			Role  int    `json:"role"`
+		} `json:"data"`
+	}
+	if err := doUpstreamBillingRequest(ctx, info, upstreamBillingURL(baseURL, "/api/user/self", nil), settings.AccessToken, settings.UserID, &userResponse); err != nil {
+		return decimal.Zero, err
+	}
+	if !userResponse.Success || strings.TrimSpace(userResponse.Data.Group) == "" {
+		return decimal.Zero, errors.New("new-api management API did not return the upstream user group")
+	}
+
+	key := strings.TrimPrefix(strings.TrimSpace(apiKey), "sk-")
+	var tokenResponse struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Items []struct {
+				Group string `json:"group"`
+			} `json:"items"`
+		} `json:"data"`
+	}
+	tokenQuery := url.Values{"token": []string{key}, "p": []string{"1"}, "page_size": []string{"2"}}
+	if err := doUpstreamBillingRequest(ctx, info, upstreamBillingURL(baseURL, "/api/token/search", tokenQuery), settings.AccessToken, settings.UserID, &tokenResponse); err != nil {
+		return decimal.Zero, err
+	}
+	if !tokenResponse.Success {
+		return decimal.Zero, errors.New("new-api management API rejected the channel API key lookup")
+	}
+	if len(tokenResponse.Data.Items) == 0 {
+		return decimal.Zero, errors.New("configured new-api account does not own the channel API key; deploy an upstream version with GET /v1/new-api/billing or use the key owner's root account")
+	}
+	if len(tokenResponse.Data.Items) > 1 {
+		return decimal.Zero, errors.New("new-api management API returned multiple matches for the channel API key")
+	}
+	usingGroup := strings.TrimSpace(tokenResponse.Data.Items[0].Group)
+	if usingGroup == "" {
+		usingGroup = strings.TrimSpace(userResponse.Data.Group)
+	}
+	if usingGroup == "auto" {
+		return decimal.Zero, errors.New("new-api auto-group keys do not have one stable upstream rate")
+	}
+	if userResponse.Data.Role < common.RoleRootUser {
+		var logResponse struct {
+			Success bool `json:"success"`
+			Data    struct {
+				Items []struct {
+					Group string `json:"group"`
+					Other string `json:"other"`
+				} `json:"items"`
+			} `json:"data"`
+		}
+		logQuery := url.Values{
+			"p":         []string{"1"},
+			"page_size": []string{"100"},
+			"type":      []string{"2"},
+			"group":     []string{usingGroup},
+		}
+		logErr := doUpstreamBillingRequest(ctx, info, upstreamBillingURL(baseURL, "/api/log/self", logQuery), settings.AccessToken, settings.UserID, &logResponse)
+		if logErr == nil && logResponse.Success {
+			for _, item := range logResponse.Data.Items {
+				if strings.TrimSpace(item.Group) != usingGroup || strings.TrimSpace(item.Other) == "" {
+					continue
+				}
+				var logDetails struct {
+					GroupRatio json.RawMessage `json:"group_ratio"`
+				}
+				if err := common.UnmarshalJsonStr(item.Other, &logDetails); err != nil || len(logDetails.GroupRatio) == 0 {
+					continue
+				}
+				rate, err := parsePositiveCostRate(logDetails.GroupRatio)
+				if err == nil {
+					return rate, nil
+				}
+			}
+		}
+		return decimal.Zero, errors.New("configured new-api account is not root and has no usable billing log for this key group; make one request in the upstream group and retry, keep a manual fallback rate, or deploy GET /v1/new-api/billing upstream")
+	}
+
+	var optionResponse struct {
+		Success bool `json:"success"`
+		Data    []struct {
+			Key   string `json:"key"`
+			Value any    `json:"value"`
+		} `json:"data"`
+	}
+	if err := doUpstreamBillingRequest(ctx, info, upstreamBillingURL(baseURL, "/api/option/", nil), settings.AccessToken, settings.UserID, &optionResponse); err != nil {
+		return decimal.Zero, err
+	}
+	if !optionResponse.Success {
+		return decimal.Zero, errors.New("new-api management API rejected the ratio options request")
+	}
+	groupRatioJSON := "{}"
+	groupGroupRatioJSON := "{}"
+	for _, option := range optionResponse.Data {
+		switch option.Key {
+		case "GroupRatio":
+			groupRatioJSON = common.Interface2String(option.Value)
+		case "GroupGroupRatio":
+			groupGroupRatioJSON = common.Interface2String(option.Value)
+		}
+	}
+	groupRatios := map[string]float64{}
+	if err := common.UnmarshalJsonStr(groupRatioJSON, &groupRatios); err != nil {
+		return decimal.Zero, fmt.Errorf("invalid upstream GroupRatio: %w", err)
+	}
+	groupGroupRatios := map[string]map[string]float64{}
+	if err := common.UnmarshalJsonStr(groupGroupRatioJSON, &groupGroupRatios); err != nil {
+		return decimal.Zero, fmt.Errorf("invalid upstream GroupGroupRatio: %w", err)
+	}
+	if overrides, ok := groupGroupRatios[userResponse.Data.Group]; ok {
+		if rate, exists := overrides[usingGroup]; exists {
+			if rate <= 0 {
+				return decimal.Zero, errors.New("upstream group override rate must be positive")
+			}
+			return decimal.NewFromFloat(rate), nil
+		}
+	}
+	rate, ok := groupRatios[usingGroup]
+	if !ok || rate <= 0 {
+		return decimal.Zero, fmt.Errorf("upstream group rate is unavailable for %s", usingGroup)
+	}
+	return decimal.NewFromFloat(rate), nil
+}
+
+func DetectUpstreamCostRate(ctx context.Context, channel *model.Channel, settings *dto.UpstreamBillingSettings) (UpstreamCostRateDetectionResult, error) {
+	if channel == nil || settings == nil {
+		return UpstreamCostRateDetectionResult{}, errors.New("channel and upstream billing settings are required")
+	}
+	if !settings.IsCostRateAuto() {
+		return UpstreamCostRateDetectionResult{
+			Multiplier: settings.EffectiveCostRate().String(),
+			Source:     dto.UpstreamCostRateSourceManual,
+			ObservedAt: common.GetTimestamp(),
+		}, nil
+	}
+	baseURL := ""
+	if channel.BaseURL != nil {
+		baseURL = *channel.BaseURL
+	}
+	keyBaseURL, err := upstreamBillingBaseURL(baseURL, &dto.UpstreamBillingSettings{})
+	if err != nil {
+		return UpstreamCostRateDetectionResult{}, err
+	}
+	resolvedSettings, err := model.ResolveChannelUpstreamBillingSettings(channel)
+	if err != nil {
+		return UpstreamCostRateDetectionResult{}, err
+	}
+	if resolvedSettings == nil {
+		resolvedSettings = settings
+	}
+	managementBaseURL, managementBaseErr := upstreamBillingBaseURL(baseURL, resolvedSettings)
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{
+		ChannelId:      channel.Id,
+		ChannelBaseUrl: baseURL,
+		ChannelSetting: channel.GetSetting(),
+	}}
+	keys := channel.GetKeys()
+	if len(keys) == 0 {
+		return UpstreamCostRateDetectionResult{}, errors.New("channel API key is required for upstream rate detection")
+	}
+	provider := resolvedSettings.Provider
+	if resolvedSettings.DetectedProvider != "" {
+		provider = resolvedSettings.DetectedProvider
+	}
+	var detectedRate decimal.Decimal
+	var source dto.UpstreamCostRateSource
+	for index, rawKey := range keys {
+		apiKey := strings.TrimSpace(rawKey)
+		if apiKey == "" {
+			continue
+		}
+		var rate decimal.Decimal
+		var probeErr error
+		switch provider {
+		case dto.UpstreamBillingProviderSub2API:
+			rate, probeErr = probeSub2APICostRate(ctx, info, keyBaseURL, apiKey)
+			source = dto.UpstreamCostRateSourceSub2API
+		case dto.UpstreamBillingProviderNewAPI:
+			rate, probeErr = probeNewAPIPublicCostRate(ctx, info, keyBaseURL, apiKey)
+			if probeErr != nil && managementBaseErr == nil {
+				rate, probeErr = probeNewAPIManagementCostRate(ctx, info, managementBaseURL, apiKey, resolvedSettings)
+			}
+			source = dto.UpstreamCostRateSourceNewAPI
+		default:
+			rate, probeErr = probeSub2APICostRate(ctx, info, keyBaseURL, apiKey)
+			source = dto.UpstreamCostRateSourceSub2API
+			if probeErr != nil {
+				rate, probeErr = probeNewAPIPublicCostRate(ctx, info, keyBaseURL, apiKey)
+				source = dto.UpstreamCostRateSourceNewAPI
+			}
+			if probeErr != nil && managementBaseErr == nil {
+				rate, probeErr = probeNewAPIManagementCostRate(ctx, info, managementBaseURL, apiKey, resolvedSettings)
+				source = dto.UpstreamCostRateSourceNewAPI
+			}
+		}
+		if probeErr != nil {
+			return UpstreamCostRateDetectionResult{}, fmt.Errorf("failed to detect upstream cost rate for channel key %d: %w", index+1, probeErr)
+		}
+		if detectedRate.IsZero() {
+			detectedRate = rate
+			continue
+		}
+		if !detectedRate.Equal(rate) {
+			return UpstreamCostRateDetectionResult{}, errors.New("channel API keys declare different upstream cost rates; split them into separate channels")
+		}
+	}
+	if !detectedRate.IsPositive() {
+		return UpstreamCostRateDetectionResult{}, errors.New("upstream cost rate detection returned no usable result")
+	}
+	return UpstreamCostRateDetectionResult{
+		Multiplier: detectedRate.String(),
+		Source:     source,
+		ObservedAt: common.GetTimestamp(),
+	}, nil
+}
+
+func DetectAndStoreUpstreamCostRate(ctx context.Context, channel *model.Channel) (UpstreamCostRateDetectionResult, error) {
+	if channel == nil || channel.Id <= 0 {
+		return UpstreamCostRateDetectionResult{}, errors.New("saved channel is required for upstream rate detection")
+	}
+	settings := channel.GetOtherSettings().UpstreamBilling
+	if settings == nil || !settings.Enabled {
+		return UpstreamCostRateDetectionResult{}, errors.New("upstream billing is not enabled for this channel")
+	}
+	result, detectErr := DetectUpstreamCostRate(ctx, channel, settings)
+	_, updateErr := model.UpdateChannelUpstreamBillingCredentials(channel.Id, func(stored *dto.UpstreamBillingSettings) (bool, error) {
+		if detectErr != nil {
+			message := detectErr.Error()
+			if len(message) > 1000 {
+				message = message[:1000]
+			}
+			if stored.CostRateError == message {
+				return false, nil
+			}
+			stored.CostRateError = message
+			return true, nil
+		}
+		stored.CostRateMultiplier = result.Multiplier
+		stored.CostRateSource = result.Source
+		stored.CostRateUpdatedAt = result.ObservedAt
+		stored.CostRateError = ""
+		return true, nil
+	})
+	if updateErr != nil {
+		return UpstreamCostRateDetectionResult{}, updateErr
+	}
+	if detectErr != nil {
+		return UpstreamCostRateDetectionResult{}, detectErr
+	}
+	return result, nil
+}
+
+type UpstreamCostRateRefreshSummary struct {
+	Scanned int `json:"scanned"`
+	Updated int `json:"updated"`
+	Failed  int `json:"failed"`
+	Skipped int `json:"skipped"`
+}
+
+func HasUpstreamCostRateRefreshWork() bool {
+	channels, err := model.ListEnabledChannelsForUpstreamBillingCredentials()
+	if err != nil {
+		return false
+	}
+	for index := range channels {
+		settings := channels[index].GetOtherSettings().UpstreamBilling
+		if settings != nil && settings.Enabled && settings.IsCostRateAuto() {
+			return true
+		}
+	}
+	return false
+}
+
+func RefreshUpstreamCostRates(ctx context.Context, report func(processed, total int)) UpstreamCostRateRefreshSummary {
+	channels, err := model.ListEnabledChannelsForUpstreamBillingCredentials()
+	if err != nil {
+		common.SysError("failed to list channels for upstream cost rate refresh: " + err.Error())
+		return UpstreamCostRateRefreshSummary{Failed: 1}
+	}
+	summary := UpstreamCostRateRefreshSummary{}
+	total := len(channels)
+	for index := range channels {
+		if ctx.Err() != nil {
+			break
+		}
+		settings := channels[index].GetOtherSettings().UpstreamBilling
+		if settings == nil || !settings.Enabled || !settings.IsCostRateAuto() {
+			summary.Skipped++
+			if report != nil {
+				report(index+1, total)
+			}
+			continue
+		}
+		summary.Scanned++
+		probeCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+		_, probeErr := DetectAndStoreUpstreamCostRate(probeCtx, &channels[index])
+		cancel()
+		if probeErr != nil {
+			summary.Failed++
+		} else {
+			summary.Updated++
+		}
+		if report != nil {
+			report(index+1, total)
+		}
+	}
+	return summary
+}
+
 func upstreamBillingSettings(info *relaycommon.RelayInfo) *dto.UpstreamBillingSettings {
 	if info == nil || info.ChannelMeta == nil || !info.SupportsUpstreamBillingReconciliation() {
 		return nil
@@ -257,6 +620,21 @@ func upstreamBillingSettings(info *relaycommon.RelayInfo) *dto.UpstreamBillingSe
 		return nil
 	}
 	return settings
+}
+
+// ApplyUpstreamCostRateToEstimatedQuota converts a local cost estimate into
+// the upstream account's estimated cost. Exact upstream costs must bypass this
+// helper because they already include the upstream account rate.
+func ApplyUpstreamCostRateToEstimatedQuota(info *relaycommon.RelayInfo, estimatedQuota int64) int64 {
+	settings := upstreamBillingSettings(info)
+	if settings == nil {
+		return estimatedQuota
+	}
+	quota, clamp := common.QuotaFromDecimalChecked(
+		decimal.NewFromInt(estimatedQuota).Mul(settings.EffectiveCostRate()),
+	)
+	noteQuotaClamp(info, clamp)
+	return quota
 }
 
 func upstreamBillingBaseURL(channelBaseURL string, settings *dto.UpstreamBillingSettings) (string, error) {
@@ -1002,6 +1380,10 @@ func ResolveUpstreamBillingQuota(ctx *gin.Context, info *relaycommon.RelayInfo, 
 	if settings == nil {
 		return estimatedQuota
 	}
+	costRate := settings.EffectiveCostRate()
+	fallbackQuota := ApplyUpstreamCostRateToEstimatedQuota(info, estimatedQuota)
+	costRateText := costRate.String()
+	costRateSource := string(settings.EffectiveCostRateSource())
 	requestFinishedAtMs := time.Now().UnixMilli()
 	requestStartedAtMs := requestFinishedAtMs
 	if !info.StartTime.IsZero() {
@@ -1020,18 +1402,30 @@ func ResolveUpstreamBillingQuota(ctx *gin.Context, info *relaycommon.RelayInfo, 
 	groupRatioText := groupRatio.String()
 	quotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
 	quotaPerUnitText := quotaPerUnit.String()
+	modelName := info.UpstreamModelName
+	if modelName == "" {
+		modelName = info.OriginModelName
+	}
+	var promptTokens, completionTokens, totalTokens int64
+	if usage != nil {
+		promptTokens = int64(usage.PromptTokens)
+		completionTokens = int64(usage.CompletionTokens)
+		totalTokens = int64(usage.TotalTokens)
+	}
 	audit := &relaycommon.UpstreamBillingAudit{
-		Enabled:           true,
-		CredentialId:      settings.CredentialID,
-		Status:            model.UpstreamBillingStatusPending,
-		UpstreamRequestId: upstreamRequestID,
-		EstimatedQuota:    estimatedQuota,
-		ChargedQuota:      estimatedQuota,
-		UserGroup:         info.UserGroup,
-		UsingGroup:        info.UsingGroup,
-		GroupRatio:        groupRatioText,
-		GroupRatioSource:  info.PriceData.GroupRatioInfo.Source,
-		QuotaPerUnit:      quotaPerUnitText,
+		Enabled:            true,
+		CredentialId:       settings.CredentialID,
+		Status:             model.UpstreamBillingStatusPending,
+		UpstreamRequestId:  upstreamRequestID,
+		EstimatedQuota:     fallbackQuota,
+		ChargedQuota:       fallbackQuota,
+		UserGroup:          info.UserGroup,
+		UsingGroup:         info.UsingGroup,
+		GroupRatio:         groupRatioText,
+		GroupRatioSource:   info.PriceData.GroupRatioInfo.Source,
+		QuotaPerUnit:       quotaPerUnitText,
+		CostRateMultiplier: costRateText,
+		CostRateSource:     costRateSource,
 	}
 	info.UpstreamBillingAudit = audit
 	if err := model.CreateUpstreamBillingRecord(&model.UpstreamBillingRecord{
@@ -1045,13 +1439,19 @@ func ResolveUpstreamBillingQuota(ctx *gin.Context, info *relaycommon.RelayInfo, 
 		IsPlayground:        info.IsPlayground,
 		Provider:            string(settings.Provider),
 		Status:              model.UpstreamBillingStatusPending,
-		ChargedQuota:        estimatedQuota,
-		EstimatedQuota:      estimatedQuota,
+		ChargedQuota:        fallbackQuota,
+		EstimatedQuota:      fallbackQuota,
 		UserGroup:           info.UserGroup,
 		UsingGroup:          info.UsingGroup,
 		GroupRatio:          groupRatioText,
 		GroupRatioSource:    info.PriceData.GroupRatioInfo.Source,
 		QuotaPerUnit:        quotaPerUnitText,
+		CostRateMultiplier:  costRateText,
+		CostRateSource:      costRateSource,
+		ModelName:           modelName,
+		PromptTokens:        promptTokens,
+		CompletionTokens:    completionTokens,
+		TotalTokens:         totalTokens,
 	}); err != nil {
 		common.SysError(fmt.Sprintf("failed to create upstream billing record for request %s: %s", info.RequestId, err.Error()))
 	}
@@ -1063,10 +1463,6 @@ func ResolveUpstreamBillingQuota(ctx *gin.Context, info *relaycommon.RelayInfo, 
 	defer cancel()
 	var usageMatch *upstreamBillingUsageMatch
 	if usage != nil {
-		modelName := info.UpstreamModelName
-		if modelName == "" {
-			modelName = info.OriginModelName
-		}
 		usageMatch = &upstreamBillingUsageMatch{
 			ModelName:        modelName,
 			PromptTokens:     usage.PromptTokens,
@@ -1087,7 +1483,7 @@ func ResolveUpstreamBillingQuota(ctx *gin.Context, info *relaycommon.RelayInfo, 
 			status = model.UpstreamBillingStatusEstimated
 		}
 		finishUpstreamBillingFallback(info, audit, status, audit.Attempts, lookupErr)
-		return estimatedQuota
+		return fallbackQuota
 	}
 
 	upstreamCostQuota, baseClamp := common.QuotaFromDecimalChecked(result.CostUSD.Mul(quotaPerUnit))
@@ -1107,23 +1503,25 @@ func ResolveUpstreamBillingQuota(ctx *gin.Context, info *relaycommon.RelayInfo, 
 	audit.MarginQuota = quota - upstreamCostQuota
 	now := common.GetTimestamp()
 	updates := map[string]interface{}{
-		"provider":           string(result.Provider),
-		"status":             model.UpstreamBillingStatusExact,
-		"identity_ambiguous": result.IdentityAmbiguous,
-		"upstream_cost_usd":  result.CostUSD.String(),
-		"upstream_quota":     result.UpstreamQuota,
-		"charged_quota":      quota,
-		"user_group":         info.UserGroup,
-		"using_group":        info.UsingGroup,
-		"group_ratio":        groupRatioText,
-		"group_ratio_source": info.PriceData.GroupRatioInfo.Source,
-		"quota_per_unit":     quotaPerUnitText,
-		"attempts":           audit.Attempts,
-		"error":              "",
-		"adjustment_applied": true,
-		"log_updated":        true,
-		"exact_at":           now,
-		"last_checked_at":    now,
+		"provider":             string(result.Provider),
+		"status":               model.UpstreamBillingStatusExact,
+		"identity_ambiguous":   result.IdentityAmbiguous,
+		"upstream_cost_usd":    result.CostUSD.String(),
+		"upstream_quota":       result.UpstreamQuota,
+		"charged_quota":        quota,
+		"user_group":           info.UserGroup,
+		"using_group":          info.UsingGroup,
+		"group_ratio":          groupRatioText,
+		"group_ratio_source":   info.PriceData.GroupRatioInfo.Source,
+		"quota_per_unit":       quotaPerUnitText,
+		"cost_rate_multiplier": costRateText,
+		"cost_rate_source":     costRateSource,
+		"attempts":             audit.Attempts,
+		"error":                "",
+		"adjustment_applied":   true,
+		"log_updated":          true,
+		"exact_at":             now,
+		"last_checked_at":      now,
 	}
 	if result.UpstreamRequestID != "" {
 		updates["upstream_request_id"] = result.UpstreamRequestID
@@ -1401,6 +1799,8 @@ func updateReconciledUpstreamBillingLog(record *model.UpstreamBillingRecord, log
 		"group_ratio":           record.GroupRatio,
 		"group_ratio_source":    record.GroupRatioSource,
 		"quota_per_unit":        record.QuotaPerUnit,
+		"cost_rate_multiplier":  record.CostRateMultiplier,
+		"cost_rate_source":      record.CostRateSource,
 		"attempts":              record.Attempts,
 		"adjustment_quota":      record.AdjustmentQuota,
 		"wallet_adjustment":     record.WalletAdjustment,
@@ -1773,6 +2173,11 @@ func DetectUpstreamBillingProvider(ctx context.Context, channel *model.Channel, 
 		accountSettings.RecheckWindowHours = resolvedSettings.RecheckWindowHours
 		accountSettings.UpstreamTokenID = resolvedSettings.UpstreamTokenID
 		accountSettings.UpstreamTokenName = resolvedSettings.UpstreamTokenName
+		accountSettings.CostRateAuto = resolvedSettings.CostRateAuto
+		accountSettings.CostRateMultiplier = resolvedSettings.CostRateMultiplier
+		accountSettings.CostRateSource = resolvedSettings.CostRateSource
+		accountSettings.CostRateUpdatedAt = resolvedSettings.CostRateUpdatedAt
+		accountSettings.CostRateError = resolvedSettings.CostRateError
 		resolvedSettings = *accountSettings
 	}
 	storedSettings := channel.GetOtherSettings().UpstreamBilling

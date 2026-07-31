@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,6 +20,27 @@ type upstreamBillingDetectionRequest struct {
 	BaseURL   *string                     `json:"base_url"`
 	Proxy     *string                     `json:"proxy"`
 	Settings  dto.UpstreamBillingSettings `json:"settings"`
+}
+
+func DetectChannelUpstreamCostRate(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil || id <= 0 {
+		common.ApiErrorMsg(c, "无效的渠道 ID")
+		return
+	}
+	channel, err := model.GetChannelById(id, true)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	detectContext, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
+	defer cancel()
+	result, err := service.DetectAndStoreUpstreamCostRate(detectContext, channel)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
+		return
+	}
+	common.ApiSuccess(c, result)
 }
 
 func DetectChannelUpstreamBilling(c *gin.Context) {
