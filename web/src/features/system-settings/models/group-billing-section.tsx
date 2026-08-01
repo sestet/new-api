@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, Trash2 } from 'lucide-react'
+import { ArrowDown, ArrowUp, Plus, Trash2 } from 'lucide-react'
 import { useMemo } from 'react'
 import { useFieldArray, useForm, useWatch } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
@@ -31,6 +31,7 @@ import {
   FormControl,
   FormField,
   FormItem,
+  FormLabel,
   FormMessage,
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
@@ -42,6 +43,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
 import {
   Table,
   TableBody,
@@ -50,9 +52,19 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 
 import { updateGroupRatioOptions } from '../api'
-import { SettingsForm } from '../components/settings-form-layout'
+import {
+  SettingsForm,
+  SettingsSwitchContent,
+  SettingsSwitchItem,
+} from '../components/settings-form-layout'
 import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
 import { useResetForm } from '../hooks/use-reset-form'
@@ -70,6 +82,8 @@ type GroupBillingSectionProps = {
     GroupGroupRatio: string
     GroupSpecialUsableGroup: string
     UserUsableGroups: string
+    AutoGroups: string
+    DefaultUseAutoGroup: boolean
   }
 }
 
@@ -95,7 +109,15 @@ export function GroupBillingSection(props: GroupBillingSectionProps) {
     control: form.control,
     name: 'specialUsableRules',
   })
+  const autoGroupFields = useFieldArray({
+    control: form.control,
+    name: 'autoGroups',
+  })
   const watchedGroups = useWatch({ control: form.control, name: 'groups' })
+  const watchedAutoGroups = useWatch({
+    control: form.control,
+    name: 'autoGroups',
+  })
   const groupItems = useMemo(() => {
     const seen = new Set<string>()
     return (watchedGroups ?? []).flatMap((group) => {
@@ -105,6 +127,13 @@ export function GroupBillingSection(props: GroupBillingSectionProps) {
       return [{ value: name, label: name }]
     })
   }, [watchedGroups])
+  const selectedAutoGroups = useMemo(
+    () => new Set((watchedAutoGroups ?? []).map((item) => item.group)),
+    [watchedAutoGroups]
+  )
+  const nextAutoGroup = groupItems.find(
+    (item) => !selectedAutoGroups.has(item.value)
+  )
 
   const saveMutation = useMutation({ mutationFn: updateGroupRatioOptions })
   const onSubmit = async (values: GroupBillingFormValues) => {
@@ -268,6 +297,168 @@ export function GroupBillingSection(props: GroupBillingSectionProps) {
                 </TableBody>
               </Table>
             </div>
+          </div>
+
+          <div className='flex min-w-0 flex-col gap-3'>
+            <div className='flex items-center justify-between gap-3'>
+              <h4 className='text-sm font-medium'>
+                {t('Auto assignment order')}
+              </h4>
+              <Button
+                type='button'
+                size='sm'
+                variant='outline'
+                disabled={!nextAutoGroup}
+                onClick={() => {
+                  if (nextAutoGroup) {
+                    autoGroupFields.append({ group: nextAutoGroup.value })
+                  }
+                }}
+              >
+                <Plus data-icon='inline-start' />
+                {t('Add group')}
+              </Button>
+            </div>
+            <div className='overflow-hidden rounded-md border'>
+              <Table className='min-w-[520px]'>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className='w-24'>{t('Priority')}</TableHead>
+                    <TableHead>{t('Group')}</TableHead>
+                    <TableHead className='w-28' />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {autoGroupFields.fields.map((autoGroup, index) => (
+                    <TableRow key={autoGroup.id}>
+                      <TableCell className='text-muted-foreground tabular-nums'>
+                        {index + 1}
+                      </TableCell>
+                      <TableCell>
+                        <FormField
+                          control={form.control}
+                          name={`autoGroups.${index}.group`}
+                          render={({ field }) => {
+                            const rowItems = groupItems.filter(
+                              (item) =>
+                                item.value === field.value ||
+                                !selectedAutoGroups.has(item.value)
+                            )
+                            return (
+                              <FormItem>
+                                <FormControl>
+                                  <Select
+                                    items={rowItems}
+                                    value={field.value}
+                                    onValueChange={(value) =>
+                                      value !== null && field.onChange(value)
+                                    }
+                                  >
+                                    <SelectTrigger className='w-full'>
+                                      <SelectValue
+                                        placeholder={t('Select a group')}
+                                      />
+                                    </SelectTrigger>
+                                    <SelectContent alignItemWithTrigger={false}>
+                                      <SelectGroup>
+                                        {rowItems.map((item) => (
+                                          <SelectItem
+                                            key={item.value}
+                                            value={item.value}
+                                          >
+                                            {item.label}
+                                          </SelectItem>
+                                        ))}
+                                      </SelectGroup>
+                                    </SelectContent>
+                                  </Select>
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )
+                          }}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <TooltipProvider>
+                          <div className='flex justify-end gap-0.5'>
+                            <Tooltip>
+                              <TooltipTrigger
+                                render={
+                                  <Button
+                                    type='button'
+                                    size='icon-sm'
+                                    variant='ghost'
+                                    aria-label={t('Move up')}
+                                    disabled={index === 0}
+                                    onClick={() =>
+                                      autoGroupFields.move(index, index - 1)
+                                    }
+                                  >
+                                    <ArrowUp />
+                                  </Button>
+                                }
+                              />
+                              <TooltipContent>{t('Move up')}</TooltipContent>
+                            </Tooltip>
+                            <Tooltip>
+                              <TooltipTrigger
+                                render={
+                                  <Button
+                                    type='button'
+                                    size='icon-sm'
+                                    variant='ghost'
+                                    aria-label={t('Move down')}
+                                    disabled={
+                                      index ===
+                                      autoGroupFields.fields.length - 1
+                                    }
+                                    onClick={() =>
+                                      autoGroupFields.move(index, index + 1)
+                                    }
+                                  >
+                                    <ArrowDown />
+                                  </Button>
+                                }
+                              />
+                              <TooltipContent>{t('Move down')}</TooltipContent>
+                            </Tooltip>
+                            <Button
+                              type='button'
+                              size='icon-sm'
+                              variant='ghost'
+                              aria-label={t('Delete group')}
+                              disabled={autoGroupFields.fields.length === 1}
+                              onClick={() => autoGroupFields.remove(index)}
+                            >
+                              <Trash2 />
+                            </Button>
+                          </div>
+                        </TooltipProvider>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+            <FormField
+              control={form.control}
+              name='defaultUseAutoGroup'
+              render={({ field }) => (
+                <SettingsSwitchItem>
+                  <SettingsSwitchContent>
+                    <FormLabel>{t('Default to auto groups')}</FormLabel>
+                  </SettingsSwitchContent>
+                  <FormControl>
+                    <Switch
+                      checked={field.value}
+                      aria-label={t('Default to auto groups')}
+                      onCheckedChange={field.onChange}
+                    />
+                  </FormControl>
+                </SettingsSwitchItem>
+              )}
+            />
           </div>
 
           <div className='flex min-w-0 flex-col gap-3'>

@@ -114,6 +114,8 @@ const BILLING_SECTIONS = [
           GroupGroupRatio: settings.GroupGroupRatio,
           GroupSpecialUsableGroup: settings.GroupSpecialUsableGroup,
           UserUsableGroups: settings.UserUsableGroups,
+          AutoGroups: settings.AutoGroups,
+          DefaultUseAutoGroup: settings.DefaultUseAutoGroup,
         }}
       />
     ),

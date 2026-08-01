@@ -125,6 +125,8 @@ type GroupRatioOptionsRequest struct {
 	GroupGroupRatio         string `json:"group_group_ratio"`
 	GroupSpecialUsableGroup string `json:"group_special_usable_group"`
 	UserUsableGroups        string `json:"user_usable_groups"`
+	AutoGroups              string `json:"auto_groups"`
+	DefaultUseAutoGroup     bool   `json:"default_use_auto_group"`
 }
 
 func UpdateGroupRatioOptions(c *gin.Context) {
@@ -149,11 +151,16 @@ func UpdateGroupRatioOptions(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	if err := setting.CheckAutoGroups(request.AutoGroups); err != nil {
+		common.ApiError(c, err)
+		return
+	}
 
 	groupRatios := map[string]float64{}
 	usableGroups := map[string]string{}
 	overrides := map[string]map[string]float64{}
 	specialRules := map[string]map[string]string{}
+	autoGroups := make([]string, 0)
 	if err := common.UnmarshalJsonStr(request.GroupRatio, &groupRatios); err != nil {
 		common.ApiError(c, err)
 		return
@@ -167,6 +174,10 @@ func UpdateGroupRatioOptions(c *gin.Context) {
 		return
 	}
 	if err := common.UnmarshalJsonStr(request.GroupSpecialUsableGroup, &specialRules); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if err := common.UnmarshalJsonStr(request.AutoGroups, &autoGroups); err != nil {
 		common.ApiError(c, err)
 		return
 	}
@@ -204,12 +215,20 @@ func UpdateGroupRatioOptions(c *gin.Context) {
 			}
 		}
 	}
+	for _, group := range autoGroups {
+		if _, ok := groupRatios[group]; !ok {
+			common.ApiErrorMsg(c, "unknown auto group: "+group)
+			return
+		}
+	}
 
 	if err := model.UpdateOptionsBulk(map[string]string{
 		"GroupRatio":              request.GroupRatio,
 		"GroupGroupRatio":         request.GroupGroupRatio,
 		"GroupSpecialUsableGroup": request.GroupSpecialUsableGroup,
 		"UserUsableGroups":        request.UserUsableGroups,
+		"AutoGroups":              request.AutoGroups,
+		"DefaultUseAutoGroup":     strconv.FormatBool(request.DefaultUseAutoGroup),
 	}); err != nil {
 		common.ApiError(c, err)
 		return
@@ -218,6 +237,8 @@ func UpdateGroupRatioOptions(c *gin.Context) {
 		"group_count":         len(groupRatios),
 		"override_count":      len(overrides),
 		"special_rule_groups": len(specialRules),
+		"auto_group_count":    len(autoGroups),
+		"default_auto_group":  request.DefaultUseAutoGroup,
 	})
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": ""})
 }

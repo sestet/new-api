@@ -44,6 +44,8 @@ export type UpdateGroupRatioOptionsRequest = {
   group_group_ratio: string
   group_special_usable_group: string
   user_usable_groups: string
+  auto_groups: string
+  default_use_auto_group: boolean
 }
 
 export type ConfirmPaymentComplianceResponse = {
@@ -271,6 +273,8 @@ export type BillingSettings = {
   GroupGroupRatio: string
   GroupSpecialUsableGroup: string
   UserUsableGroups: string
+  AutoGroups: string
+  DefaultUseAutoGroup: boolean
   ExposeRatioEnabled: boolean
   'billing_setting.billing_mode': string
   'billing_setting.billing_expr': string

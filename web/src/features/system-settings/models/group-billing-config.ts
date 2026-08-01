@@ -54,6 +54,14 @@ export const groupBillingSchema = z
         visible: z.boolean(),
       })
     ),
+    autoGroups: z
+      .array(
+        z.object({
+          group: z.string().trim().min(1, 'Select a group'),
+        })
+      )
+      .min(1, 'At least one group is required'),
+    defaultUseAutoGroup: z.boolean(),
   })
   .superRefine((values, context) => {
     const groupNames = new Set<string>()
@@ -74,6 +82,24 @@ export const groupBillingSchema = z
         message: 'Default group is required',
       })
     }
+    const autoGroups = new Set<string>()
+    values.autoGroups.forEach((autoGroup, index) => {
+      if (!groupNames.has(autoGroup.group)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['autoGroups', index, 'group'],
+          message: 'The selected group no longer exists',
+        })
+      }
+      if (autoGroups.has(autoGroup.group)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['autoGroups', index, 'group'],
+          message: 'Group names must be unique',
+        })
+      }
+      autoGroups.add(autoGroup.group)
+    })
     const pairs = new Set<string>()
     values.overrides.forEach((override, index) => {
       if (!groupNames.has(override.userGroup)) {
@@ -144,11 +170,25 @@ function parseRecord(value: string): Record<string, unknown> {
   return {}
 }
 
+function parseStringArray(value: string): string[] {
+  try {
+    const parsed: unknown = JSON.parse(value)
+    if (Array.isArray(parsed)) {
+      return parsed.filter((item): item is string => typeof item === 'string')
+    }
+  } catch {
+    // Invalid legacy values fall back to the default group.
+  }
+  return []
+}
+
 export function parseGroupBillingDefaults(defaults: {
   GroupRatio: string
   GroupGroupRatio: string
   GroupSpecialUsableGroup: string
   UserUsableGroups: string
+  AutoGroups: string
+  DefaultUseAutoGroup: boolean
 }): GroupBillingFormInput {
   const rawRatios = parseRecord(defaults.GroupRatio)
   const rawDescriptions = parseRecord(defaults.UserUsableGroups)
@@ -233,6 +273,17 @@ export function parseGroupBillingDefaults(defaults: {
     )
   })
 
+  const autoGroupNames: string[] = []
+  const seenAutoGroups = new Set<string>()
+  parseStringArray(defaults.AutoGroups).forEach((group) => {
+    if (!nameSet.has(group) || seenAutoGroups.has(group)) return
+    seenAutoGroups.add(group)
+    autoGroupNames.push(group)
+  })
+  if (autoGroupNames.length === 0) {
+    autoGroupNames.push('default')
+  }
+
   return {
     groups: names.map((name) => ({
       name,
@@ -245,6 +296,8 @@ export function parseGroupBillingDefaults(defaults: {
     })),
     overrides,
     specialUsableRules,
+    autoGroups: autoGroupNames.map((group) => ({ group })),
+    defaultUseAutoGroup: defaults.DefaultUseAutoGroup,
   }
 }
 
@@ -282,5 +335,9 @@ export function serializeGroupBillingValues(
     group_group_ratio: JSON.stringify(overrides),
     group_special_usable_group: JSON.stringify(specialUsableGroups),
     user_usable_groups: JSON.stringify(usableGroups),
+    auto_groups: JSON.stringify(
+      values.autoGroups.map((autoGroup) => autoGroup.group)
+    ),
+    default_use_auto_group: values.defaultUseAutoGroup,
   }
 }

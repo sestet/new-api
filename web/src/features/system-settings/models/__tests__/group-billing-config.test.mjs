@@ -31,6 +31,8 @@ test('missing default group is restored with ratio one', () => {
     GroupGroupRatio: '{}',
     GroupSpecialUsableGroup: '{}',
     UserUsableGroups: '{"premium":"Premium"}',
+    AutoGroups: '["premium"]',
+    DefaultUseAutoGroup: false,
   })
 
   assert.deepEqual(values.groups, [
@@ -47,6 +49,7 @@ test('missing default group is restored with ratio one', () => {
       globallyUsable: true,
     },
   ])
+  assert.deepEqual(values.autoGroups, [{ group: 'premium' }])
 })
 
 test('duplicate group names and override pairs are rejected', () => {
@@ -70,6 +73,8 @@ test('duplicate group names and override pairs are rejected', () => {
       { userGroup: 'default', usingGroup: 'default', ratio: 3 },
     ],
     specialUsableRules: [],
+    autoGroups: [{ group: 'default' }],
+    defaultUseAutoGroup: false,
   })
 
   assert.equal(result.success, false)
@@ -106,6 +111,8 @@ test('override rows serialize as nested user and using group map', () => {
       { userGroup: 'default', targetGroup: 'premium', visible: true },
       { userGroup: 'premium', targetGroup: 'default', visible: false },
     ],
+    autoGroups: [{ group: 'premium' }, { group: 'default' }],
+    defaultUseAutoGroup: true,
   })
 
   assert.deepEqual(JSON.parse(request.group_ratio), {
@@ -122,6 +129,8 @@ test('override rows serialize as nested user and using group map', () => {
   assert.deepEqual(JSON.parse(request.user_usable_groups), {
     default: 'Default',
   })
+  assert.deepEqual(JSON.parse(request.auto_groups), ['premium', 'default'])
+  assert.equal(request.default_use_auto_group, true)
 })
 
 test('legacy special usable rules parse prefixes and reject duplicate pairs', () => {
@@ -130,6 +139,8 @@ test('legacy special usable rules parse prefixes and reject duplicate pairs', ()
     GroupGroupRatio: '{}',
     GroupSpecialUsableGroup: '{"default":{"premium":"Premium","-:default":""}}',
     UserUsableGroups: '{"default":"Default","premium":"Premium"}',
+    AutoGroups: '["default"]',
+    DefaultUseAutoGroup: false,
   })
 
   assert.deepEqual(values.specialUsableRules, [
@@ -157,12 +168,53 @@ test('legacy special usable rules parse prefixes and reject duplicate pairs', ()
       { userGroup: 'default', targetGroup: 'premium', visible: true },
       { userGroup: 'default', targetGroup: 'premium', visible: false },
     ],
+    autoGroups: [{ group: 'default' }],
+    defaultUseAutoGroup: false,
   })
 
   assert.equal(result.success, false)
   assert.ok(
     result.error.issues.some(
       (issue) => issue.message === 'Special usable group rules must be unique'
+    )
+  )
+})
+
+test('auto groups preserve order, discard invalid legacy entries, and reject duplicates', () => {
+  const values = parseGroupBillingDefaults({
+    GroupRatio: '{"default":1,"premium":2}',
+    GroupGroupRatio: '{}',
+    GroupSpecialUsableGroup: '{}',
+    UserUsableGroups: '{"default":"Default","premium":"Premium"}',
+    AutoGroups: '["premium","missing","premium","default"]',
+    DefaultUseAutoGroup: true,
+  })
+
+  assert.deepEqual(values.autoGroups, [
+    { group: 'premium' },
+    { group: 'default' },
+  ])
+  assert.equal(values.defaultUseAutoGroup, true)
+
+  const result = groupBillingSchema.safeParse({
+    groups: [
+      {
+        name: 'default',
+        description: 'Default',
+        ratio: 1,
+        globallyUsable: true,
+      },
+    ],
+    overrides: [],
+    specialUsableRules: [],
+    autoGroups: [{ group: 'default' }, { group: 'default' }],
+    defaultUseAutoGroup: false,
+  })
+
+  assert.equal(result.success, false)
+  assert.ok(
+    result.error.issues.some(
+      (issue) => issue.message === 'Group names must be unique'
     )
   )
 })

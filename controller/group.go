@@ -35,6 +35,11 @@ func GetUserGroups(c *gin.Context) {
 			"desc": desc,
 		}
 	}
+	if len(service.GetUserAutoGroup(userGroup)) > 0 {
+		usableGroups["auto"] = map[string]interface{}{
+			"desc": "auto",
+		}
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",

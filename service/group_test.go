@@ -43,3 +43,17 @@ func TestGetUserUsableGroupsKeepsUsersOwnGroupAvailable(t *testing.T) {
 
 	assert.Equal(t, "用户分组", GetUserUsableGroups("vip")["vip"])
 }
+
+func TestGetUserAutoGroupPreservesConfiguredUsableOrder(t *testing.T) {
+	originalAutoGroups := setting.AutoGroups2JsonString()
+	originalUsableGroups := setting.UserUsableGroups2JSONString()
+	t.Cleanup(func() {
+		require.NoError(t, setting.UpdateAutoGroupsByJsonString(originalAutoGroups))
+		require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(originalUsableGroups))
+	})
+
+	require.NoError(t, setting.UpdateAutoGroupsByJsonString(`["premium","hidden","default"]`))
+	require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(`{"default":"Default","premium":"Premium"}`))
+
+	assert.Equal(t, []string{"premium", "default"}, GetUserAutoGroup("default"))
+}

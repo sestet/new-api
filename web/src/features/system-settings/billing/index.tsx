@@ -51,6 +51,8 @@ const defaultBillingSettings: BillingSettings = {
   GroupGroupRatio: '{}',
   GroupSpecialUsableGroup: '{}',
   UserUsableGroups: '{"default":"Default group"}',
+  AutoGroups: '["default"]',
+  DefaultUseAutoGroup: false,
   ExposeRatioEnabled: false,
   'billing_setting.billing_mode': '{}',
   'billing_setting.billing_expr': '{}',
