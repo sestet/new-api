@@ -1047,11 +1047,19 @@ func TestResolveUpstreamBillingQuotaClassifiesFallback(t *testing.T) {
 
 func TestRunUpstreamBillingReconcileAdjustsWalletAndIsIdempotent(t *testing.T) {
 	InitHttpClient()
+	require.NoError(t, model.DB.AutoMigrate(&model.QuotaData{}))
 	require.NoError(t, model.DB.Where("1 = 1").Delete(&model.UpstreamBillingRecord{}).Error)
 	require.NoError(t, model.DB.Where("id IN ?", []int{7101, 7102}).Delete(&model.User{}).Error)
 	require.NoError(t, model.DB.Where("id IN ?", []int{7201, 7202}).Delete(&model.Token{}).Error)
 	require.NoError(t, model.DB.Where("id = ?", 7301).Delete(&model.Channel{}).Error)
+	require.NoError(t, model.DB.Where("user_id IN ?", []int{7101, 7102}).Delete(&model.QuotaData{}).Error)
 	require.NoError(t, model.LOG_DB.Where("request_id IN ?", []string{"reconcile-more", "reconcile-refund"}).Delete(&model.Log{}).Error)
+	originalDataExportEnabled := common.DataExportEnabled
+	common.DataExportEnabled = true
+	t.Cleanup(func() {
+		common.DataExportEnabled = originalDataExportEnabled
+		_ = model.DB.Where("user_id IN ?", []int{7101, 7102}).Delete(&model.QuotaData{}).Error
+	})
 
 	moreCost := "0.005"
 	var costMu sync.RWMutex
@@ -1115,6 +1123,7 @@ func TestRunUpstreamBillingReconcileAdjustsWalletAndIsIdempotent(t *testing.T) {
 			RemainQuota: 99000,
 			UsedQuota:   1000,
 		}).Error)
+		createdAt := common.GetTimestamp()
 		require.NoError(t, model.LOG_DB.Create(&model.Log{
 			UserId:    testCase.userID,
 			Type:      model.LogTypeConsume,
@@ -1122,8 +1131,17 @@ func TestRunUpstreamBillingReconcileAdjustsWalletAndIsIdempotent(t *testing.T) {
 			ChannelId: channel.Id,
 			TokenId:   testCase.tokenID,
 			RequestId: testCase.requestID,
-			CreatedAt: common.GetTimestamp(),
+			CreatedAt: createdAt,
 			Other:     common.MapToJsonStr(map[string]interface{}{"billing_source": BillingSourceWallet}),
+		}).Error)
+		require.NoError(t, model.DB.Create(&model.QuotaData{
+			UserID:    testCase.userID,
+			CreatedAt: createdAt - (createdAt % 3600),
+			TokenID:   testCase.tokenID,
+			ChannelID: channel.Id,
+			NodeName:  common.NodeName,
+			Count:     1,
+			Quota:     1000,
 		}).Error)
 		require.NoError(t, model.DB.Create(&model.UpstreamBillingRecord{
 			LocalRequestId:    testCase.requestID,
@@ -1186,6 +1204,10 @@ func TestRunUpstreamBillingReconcileAdjustsWalletAndIsIdempotent(t *testing.T) {
 		billingInfo, ok := adminInfo["upstream_billing"].(map[string]interface{})
 		require.True(t, ok)
 		assert.Empty(t, billingInfo["error"])
+
+		var quotaData model.QuotaData
+		require.NoError(t, model.DB.Where("user_id = ?", testCase.userID).First(&quotaData).Error)
+		assert.EqualValues(t, testCase.expectedQuota, quotaData.Quota)
 	}
 
 	var adjustedChannel model.Channel
@@ -1211,6 +1233,9 @@ func TestRunUpstreamBillingReconcileAdjustsWalletAndIsIdempotent(t *testing.T) {
 	var revisedLog model.Log
 	require.NoError(t, model.LOG_DB.Where("request_id = ?", "reconcile-more").First(&revisedLog).Error)
 	assert.EqualValues(t, 4000, revisedLog.Quota)
+	var revisedQuotaData model.QuotaData
+	require.NoError(t, model.DB.Where("user_id = ?", 7101).First(&revisedQuotaData).Error)
+	assert.EqualValues(t, 4000, revisedQuotaData.Quota)
 
 	secondSummary := RunUpstreamBillingReconcile(context.Background(), 20, 24*time.Hour)
 	assert.Zero(t, secondSummary.Scanned)

@@ -51,8 +51,8 @@ func UpdateQuotaData() {
 var CacheQuotaData = make(map[string]*QuotaData)
 var CacheQuotaDataLock = sync.Mutex{}
 
-func logQuotaDataCache(quotaData *QuotaData) {
-	key := fmt.Sprintf("%d\x00%s\x00%s\x00%d\x00%s\x00%d\x00%d\x00%s",
+func quotaDataCacheKey(quotaData *QuotaData) string {
+	return fmt.Sprintf("%d\x00%s\x00%s\x00%d\x00%s\x00%d\x00%d\x00%s",
 		quotaData.UserID,
 		quotaData.Username,
 		quotaData.ModelName,
@@ -62,6 +62,10 @@ func logQuotaDataCache(quotaData *QuotaData) {
 		quotaData.ChannelID,
 		quotaData.NodeName,
 	)
+}
+
+func logQuotaDataCache(quotaData *QuotaData) {
+	key := quotaDataCacheKey(quotaData)
 	count := quotaData.Count
 	quota := quotaData.Quota
 	tokenUsed := quotaData.TokenUsed

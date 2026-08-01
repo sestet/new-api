@@ -256,6 +256,7 @@ type UpstreamBillingAdjustmentInput struct {
 	IsPlayground      bool
 	LogOnly           bool
 	LookupAttempts    int
+	QuotaData         *QuotaDataLogParams
 }
 
 type UpstreamBillingAdjustmentResult struct {
@@ -275,6 +276,9 @@ func ApplyUpstreamBillingAdjustment(input UpstreamBillingAdjustmentInput) (Upstr
 	result := UpstreamBillingAdjustmentResult{}
 	userId := 0
 	tokenKey := ""
+	var cachedQuotaData *QuotaData
+	var quotaDataDelta int64
+	quotaDataLocked := false
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var record UpstreamBillingRecord
 		if err := lockForUpdate(tx).Where("local_request_id = ?", input.LocalRequestId).First(&record).Error; err != nil {
@@ -382,6 +386,61 @@ func ApplyUpstreamBillingAdjustment(input UpstreamBillingAdjustmentInput) (Upstr
 			}
 		}
 
+		if common.DataExportEnabled && input.QuotaData != nil && delta != 0 {
+			quotaData := &QuotaData{
+				UserID:    input.QuotaData.UserID,
+				Username:  input.QuotaData.Username,
+				ModelName: input.QuotaData.ModelName,
+				CreatedAt: input.QuotaData.CreatedAt - (input.QuotaData.CreatedAt % 3600),
+				UseGroup:  input.QuotaData.UseGroup,
+				TokenID:   input.QuotaData.TokenID,
+				ChannelID: input.QuotaData.ChannelID,
+				NodeName:  input.QuotaData.NodeName,
+			}
+			CacheQuotaDataLock.Lock()
+			quotaDataLocked = true
+			cachedQuotaData = CacheQuotaData[quotaDataCacheKey(quotaData)]
+
+			var storedQuotaData QuotaData
+			query := lockForUpdate(tx).Where(
+				"user_id = ? and username = ? and model_name = ? and created_at = ? and use_group = ? and token_id = ? and channel_id = ? and node_name = ?",
+				quotaData.UserID,
+				quotaData.Username,
+				quotaData.ModelName,
+				quotaData.CreatedAt,
+				quotaData.UseGroup,
+				quotaData.TokenID,
+				quotaData.ChannelID,
+				quotaData.NodeName,
+			).First(&storedQuotaData)
+			if query.Error != nil && !errors.Is(query.Error, gorm.ErrRecordNotFound) {
+				return query.Error
+			}
+
+			if cachedQuotaData != nil {
+				combinedQuota := storedQuotaData.Quota + cachedQuotaData.Quota
+				if delta < 0 && combinedQuota < -delta {
+					return errors.New("quota data adjustment would make the aggregate negative")
+				}
+				quotaDataDelta = delta
+			} else if query.Error == nil {
+				if delta < 0 && storedQuotaData.Quota < -delta {
+					return errors.New("quota data adjustment would make the aggregate negative")
+				}
+				if err := tx.Model(&QuotaData{}).Where("id = ?", storedQuotaData.Id).
+					Update("quota", gorm.Expr("quota + ?", delta)).Error; err != nil {
+					return err
+				}
+			} else {
+				quotaData.Count = 1
+				quotaData.Quota = input.ExactQuota
+				quotaData.TokenUsed = input.QuotaData.TokenUsed
+				if err := tx.Create(quotaData).Error; err != nil {
+					return err
+				}
+			}
+		}
+
 		now := common.GetTimestamp()
 		exactAt := record.ExactAt
 		if exactAt == 0 {
@@ -427,6 +486,12 @@ func ApplyUpstreamBillingAdjustment(input UpstreamBillingAdjustmentInput) (Upstr
 		result.WalletAdjustment = walletAdjustment
 		return nil
 	})
+	if quotaDataLocked {
+		if err == nil && cachedQuotaData != nil {
+			cachedQuotaData.Quota += quotaDataDelta
+		}
+		CacheQuotaDataLock.Unlock()
+	}
 	if err != nil {
 		return UpstreamBillingAdjustmentResult{}, err
 	}

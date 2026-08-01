@@ -20,6 +20,7 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
 import {
+  getUpstreamBillingAccountDisplay,
   getUpstreamBillingProviderLabel,
   getUpstreamBillingStatusPresentation,
 } from '../upstream-billing-status.ts'
@@ -54,5 +55,17 @@ describe('upstream billing status presentation', () => {
     assert.equal(getUpstreamBillingProviderLabel('sub2api'), 'Sub2API')
     assert.equal(getUpstreamBillingProviderLabel('custom'), 'custom')
     assert.equal(getUpstreamBillingProviderLabel(undefined), '')
+  })
+
+  test('keeps the historical account ID visible without leaking a hidden name', () => {
+    assert.equal(
+      getUpstreamBillingAccountDisplay(42, 'Primary account', true),
+      'Primary account (#42)'
+    )
+    assert.equal(getUpstreamBillingAccountDisplay(42, undefined, true), '#42')
+    assert.equal(
+      getUpstreamBillingAccountDisplay(42, 'Primary account', false),
+      '•••• (#42)'
+    )
   })
 })

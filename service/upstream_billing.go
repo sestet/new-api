@@ -2061,6 +2061,12 @@ func runUpstreamBillingReconcile(ctx context.Context, batchSize int, lookback ti
 			common.SysError(fmt.Sprintf("upstream billing reconciliation quota saturation: request=%s op=%s kind=%s original=%g clamped=%d", record.LocalRequestId, clamp.Op, clamp.Kind, clamp.Original, clamp.Clamped))
 		}
 		billingSource, _ := logOther["billing_source"].(string)
+		nodeName := common.NodeName
+		if adminInfo, ok := logOther["admin_info"].(map[string]interface{}); ok {
+			if loggedNodeName, ok := adminInfo["node_name"].(string); ok && strings.TrimSpace(loggedNodeName) != "" {
+				nodeName = loggedNodeName
+			}
+		}
 		previousChargedQuota := record.ChargedQuota
 		wasExact := record.Status == model.UpstreamBillingStatusExact && record.AdjustmentApplied
 		adjustment, applyErr := model.ApplyUpstreamBillingAdjustment(model.UpstreamBillingAdjustmentInput{
@@ -2078,6 +2084,18 @@ func runUpstreamBillingReconcile(ctx context.Context, batchSize int, lookback ti
 			IsPlayground:      record.IsPlayground,
 			LogOnly:           billingSource == BillingSourceChannelTest,
 			LookupAttempts:    attempts,
+			QuotaData: &model.QuotaDataLogParams{
+				UserID:    logEntry.UserId,
+				Username:  logEntry.Username,
+				ModelName: logEntry.ModelName,
+				Quota:     logEntry.Quota,
+				CreatedAt: logEntry.CreatedAt,
+				TokenUsed: logEntry.PromptTokens + logEntry.CompletionTokens,
+				UseGroup:  logEntry.Group,
+				TokenID:   logEntry.TokenId,
+				ChannelID: logEntry.ChannelId,
+				NodeName:  nodeName,
+			},
 		})
 		if applyErr != nil {
 			markUpstreamBillingRetry(record, attempts, applyErr)

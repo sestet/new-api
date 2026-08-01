@@ -45,3 +45,13 @@ export function getUpstreamBillingProviderLabel(
   if (provider === 'sub2api') return 'Sub2API'
   return provider ?? ''
 }
+
+export function getUpstreamBillingAccountDisplay(
+  credentialId: number,
+  accountName: string | undefined,
+  sensitiveVisible: boolean
+): string {
+  if (!sensitiveVisible) return `•••• (#${credentialId})`
+  if (accountName) return `${accountName} (#${credentialId})`
+  return `#${credentialId}`
+}

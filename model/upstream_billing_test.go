@@ -278,6 +278,90 @@ func TestApplyUpstreamBillingAdjustmentUsesSubscriptionThenWalletAndIsIdempotent
 	assert.Equal(t, int64(9900), user.Quota)
 }
 
+func TestApplyUpstreamBillingAdjustmentKeepsQuotaDataInSyncAcrossRevisions(t *testing.T) {
+	const requestID = "quota-data-adjustment"
+	require.NoError(t, DB.Where("local_request_id = ?", requestID).Delete(&UpstreamBillingRecord{}).Error)
+	require.NoError(t, DB.Where("user_id = ?", 8401).Delete(&QuotaData{}).Error)
+	CacheQuotaDataLock.Lock()
+	CacheQuotaData = make(map[string]*QuotaData)
+	CacheQuotaDataLock.Unlock()
+
+	originalDataExportEnabled := common.DataExportEnabled
+	common.DataExportEnabled = true
+	t.Cleanup(func() {
+		common.DataExportEnabled = originalDataExportEnabled
+		_ = DB.Where("local_request_id = ?", requestID).Delete(&UpstreamBillingRecord{}).Error
+		_ = DB.Where("user_id = ?", 8401).Delete(&QuotaData{}).Error
+		CacheQuotaDataLock.Lock()
+		CacheQuotaData = make(map[string]*QuotaData)
+		CacheQuotaDataLock.Unlock()
+	})
+
+	require.NoError(t, DB.Create(&UpstreamBillingRecord{
+		LocalRequestId: requestID,
+		Status:         UpstreamBillingStatusEstimated,
+		ChargedQuota:   1000,
+	}).Error)
+	quotaData := QuotaDataLogParams{
+		UserID:    8401,
+		Username:  "quota-data-user",
+		ModelName: "gpt-image-1",
+		Quota:     1000,
+		CreatedAt: 3661,
+		TokenUsed: 120,
+		UseGroup:  "default",
+		TokenID:   8402,
+		ChannelID: 8403,
+		NodeName:  "node-a",
+	}
+	LogQuotaData(quotaData)
+
+	first, err := ApplyUpstreamBillingAdjustment(UpstreamBillingAdjustmentInput{
+		LocalRequestId: requestID,
+		Provider:       "sub2api",
+		ExactQuota:     1500,
+		CurrentCharged: 1000,
+		LogOnly:        true,
+		QuotaData:      &quotaData,
+	})
+	require.NoError(t, err)
+	assert.True(t, first.Applied)
+	SaveQuotaDataCache()
+
+	var stored QuotaData
+	require.NoError(t, DB.Where("user_id = ?", quotaData.UserID).First(&stored).Error)
+	assert.Equal(t, int64(1500), stored.Quota)
+	assert.Equal(t, 1, stored.Count)
+	assert.Equal(t, 120, stored.TokenUsed)
+
+	second, err := ApplyUpstreamBillingAdjustment(UpstreamBillingAdjustmentInput{
+		LocalRequestId: requestID,
+		Provider:       "sub2api",
+		ExactQuota:     1200,
+		CurrentCharged: 1500,
+		LogOnly:        true,
+		QuotaData:      &quotaData,
+	})
+	require.NoError(t, err)
+	assert.True(t, second.Applied)
+
+	require.NoError(t, DB.Where("user_id = ?", quotaData.UserID).First(&stored).Error)
+	assert.Equal(t, int64(1200), stored.Quota)
+
+	idempotent, err := ApplyUpstreamBillingAdjustment(UpstreamBillingAdjustmentInput{
+		LocalRequestId: requestID,
+		Provider:       "sub2api",
+		ExactQuota:     1200,
+		CurrentCharged: 1200,
+		LogOnly:        true,
+		QuotaData:      &quotaData,
+	})
+	require.NoError(t, err)
+	assert.False(t, idempotent.Applied)
+	require.NoError(t, DB.Where("user_id = ?", quotaData.UserID).First(&stored).Error)
+	assert.Equal(t, int64(1200), stored.Quota)
+}
+
 func TestApplyUpstreamBillingAdjustmentLogOnlyDoesNotChangeAccountBalances(t *testing.T) {
 	const userID = 8401
 	const channelID = 8402

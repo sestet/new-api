@@ -45,6 +45,7 @@ import {
   UPSTREAM_BILLING_STATUS_FILTERS,
 } from '../constants'
 import { buildSearchParams } from '../lib/filter'
+import { buildUsageFilterOptionsParams } from '../lib/usage-filter-options'
 import { getDefaultTimeRange } from '../lib/utils'
 import type { CommonLogFilters, UpstreamBillingStatusFilter } from '../types'
 import { CompactDateTimeRangePicker } from './compact-date-time-range-picker'
@@ -198,25 +199,20 @@ export function CommonLogsFilterBar<TData>(
     draft.sourceKey === searchState.sourceKey ? draft : searchState
   const filters = activeDraft.filters
   const logType = activeDraft.logType
+  const filterStartTime = filters.startTime?.getTime()
+  const filterEndTime = filters.endTime?.getTime()
+  const filterOptionsParams = buildUsageFilterOptionsParams(
+    filters.startTime,
+    filters.endTime
+  )
   const filterOptionsQuery = useQuery({
     queryKey: [
       'usage-log-filter-options',
       isAdmin,
-      searchState.filters.startTime?.getTime(),
-      searchState.filters.endTime?.getTime(),
+      filterStartTime,
+      filterEndTime,
     ],
-    queryFn: () =>
-      getUsageFilterOptions(
-        {
-          start_timestamp: searchState.filters.startTime
-            ? Math.floor(searchState.filters.startTime.getTime() / 1000)
-            : undefined,
-          end_timestamp: searchState.filters.endTime
-            ? Math.floor(searchState.filters.endTime.getTime() / 1000)
-            : undefined,
-        },
-        isAdmin
-      ),
+    queryFn: () => getUsageFilterOptions(filterOptionsParams, isAdmin),
     select: (response) =>
       response.success
         ? (response.data ?? EMPTY_FILTER_OPTIONS)

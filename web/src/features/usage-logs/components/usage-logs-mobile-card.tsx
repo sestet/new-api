@@ -340,11 +340,6 @@ function CommonLogsCard<TData>({
           cell={cells.get('channel')}
           valueClassName='[&_.flex-col]:max-w-none'
         />
-        <SummaryField
-          label={t('Upstream Account')}
-          cell={cells.get('upstream_account')}
-          valueClassName='[&_.flex-col]:max-w-none'
-        />
         {rowData && cells.has('user') ? (
           <MobileUserField log={rowData} />
         ) : (

@@ -47,6 +47,7 @@ import { cn } from '@/lib/utils'
 
 import { LOG_TYPE_ALL_VALUE } from '../../constants'
 import type { UsageLog } from '../../data/schema'
+import { getAdminBillingBreakdown } from '../../lib/admin-billing-breakdown'
 import {
   formatModelName,
   getTieredBillingSummary,
@@ -55,8 +56,8 @@ import {
   isViolationFeeLog,
   renderAuditContent,
 } from '../../lib/format'
-import { getAdminBillingBreakdown } from '../../lib/admin-billing-breakdown'
 import {
+  getUpstreamBillingAccountDisplay,
   getUpstreamBillingProviderLabel,
   getUpstreamBillingStatusPresentation,
 } from '../../lib/upstream-billing-status'
@@ -324,6 +325,21 @@ export function useCommonLogsColumns(
 
           const other = parseLogOther(log.other)
           const affinity = other?.admin_info?.channel_affinity
+          const billing = other?.admin_info?.upstream_billing
+          const credentialId = billing?.credential_id
+          const upstreamAccount = credentialId
+            ? upstreamAccountById.get(credentialId)
+            : undefined
+          const upstreamProvider = getUpstreamBillingProviderLabel(
+            billing?.provider || upstreamAccount?.provider
+          )
+          const upstreamAccountDisplay = credentialId
+            ? getUpstreamBillingAccountDisplay(
+                credentialId,
+                upstreamAccount?.name,
+                sensitiveVisible
+              )
+            : ''
           const rawUseChannel = other?.admin_info?.use_channel ?? []
           const useChannel = Array.isArray(rawUseChannel)
             ? rawUseChannel.map(String).filter(Boolean)
@@ -445,6 +461,17 @@ export function useCommonLogsColumns(
                         {t('Key')}: {multiKeyIndex}
                       </p>
                     )}
+                    {credentialId && (
+                      <div className='border-t pt-1 text-xs'>
+                        <p className='font-medium'>{t('Upstream Account')}</p>
+                        <p>{upstreamAccountDisplay}</p>
+                        {upstreamProvider && (
+                          <p className='text-muted-foreground'>
+                            {t('Provider')}: {upstreamProvider}
+                          </p>
+                        )}
+                      </div>
+                    )}
                     {affinity && (
                       <div className='border-t pt-1 text-xs'>
                         <p className='font-medium'>{t('Channel Affinity')}</p>
@@ -467,42 +494,6 @@ export function useCommonLogsColumns(
             </TooltipProvider>
           )
         },
-      },
-      {
-        id: 'upstream_account',
-        header: t('Upstream Account'),
-        accessorFn: (row) => {
-          const other = parseLogOther(row.other)
-          return other?.admin_info?.upstream_billing?.credential_id ?? 0
-        },
-        cell: function UpstreamAccountCell({ row }) {
-          const { sensitiveVisible } = useUsageLogsContext()
-          const other = parseLogOther(row.original.other)
-          const billing = other?.admin_info?.upstream_billing
-          const credentialId = billing?.credential_id
-          if (!credentialId) {
-            return <span className='text-muted-foreground/40 text-xs'>-</span>
-          }
-
-          const account = upstreamAccountById.get(credentialId)
-          const accountName = account?.name || `#${credentialId}`
-          const provider = getUpstreamBillingProviderLabel(
-            account?.provider || billing.provider
-          )
-
-          return (
-            <div className='flex max-w-[160px] flex-col gap-0.5'>
-              <span className='truncate text-xs font-medium'>
-                {sensitiveVisible ? accountName : '••••'}
-              </span>
-              <span className='text-muted-foreground truncate font-mono text-[11px]'>
-                #{credentialId}
-                {provider ? ` · ${provider}` : ''}
-              </span>
-            </div>
-          )
-        },
-        size: 150,
       },
       {
         id: 'user',
@@ -763,9 +754,7 @@ export function useCommonLogsColumns(
                       <div className='grid gap-1 text-xs'>
                         <span>
                           {t('Upstream actual cost')}:{' '}
-                          {formatLogQuota(
-                            billingBreakdown.upstreamCostQuota
-                          )}
+                          {formatLogQuota(billingBreakdown.upstreamCostQuota)}
                         </span>
                         <span>
                           {t('Effective group ratio')}: ×
