@@ -7,7 +7,7 @@ import (
 
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
-	"github.com/QuantumNous/new-api/types"
+	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -28,7 +28,7 @@ func TestNewTokenQuotaAPIErrorKeepsLifetimeQuotaFailureForbidden(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, apiErr.StatusCode)
 }
 
-func TestBillingSessionReserveRejectsInsufficientWalletQuota(t *testing.T) {
+func TestBillingSessionReserveAllowsWalletArrearsAfterRetry(t *testing.T) {
 	truncate(t)
 	const (
 		userID         = 9101
@@ -46,20 +46,13 @@ func TestBillingSessionReserveRejectsInsufficientWalletQuota(t *testing.T) {
 		tokenConsumed:    reservedQuota,
 	}
 
-	err := session.Reserve(targetQuota)
-
-	var apiErr *types.NewAPIError
-	require.ErrorAs(t, err, &apiErr)
-	require.EqualValues(t, types.ErrorCodeInsufficientUserQuota, apiErr.GetErrorCode())
-	require.EqualValues(t, http.StatusForbidden, apiErr.StatusCode)
-	require.True(t, types.IsSkipRetryError(apiErr))
-	require.False(t, types.IsRecordErrorLog(apiErr))
-	require.EqualValues(t, reservedQuota, session.GetPreConsumedQuota())
-	require.EqualValues(t, reservedQuota, funding.consumed)
+	require.NoError(t, session.Reserve(targetQuota))
+	require.EqualValues(t, targetQuota, session.GetPreConsumedQuota())
+	require.EqualValues(t, targetQuota, funding.consumed)
 
 	quota, quotaErr := model.GetUserQuota(userID, true)
 	require.NoError(t, quotaErr)
-	require.EqualValues(t, remainingQuota, quota)
+	require.EqualValues(t, remainingQuota-(targetQuota-reservedQuota), quota)
 }
 
 func TestBillingSessionSettleChargesSubscriptionOverflowToWalletOnce(t *testing.T) {

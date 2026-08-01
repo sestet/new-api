@@ -115,6 +115,7 @@ const BILLING_SECTIONS = [
           GroupSpecialUsableGroup: settings.GroupSpecialUsableGroup,
           UserUsableGroups: settings.UserUsableGroups,
           AutoGroups: settings.AutoGroups,
+          MaxTokenAutoGroups: settings.MaxTokenAutoGroups,
           DefaultUseAutoGroup: settings.DefaultUseAutoGroup,
         }}
       />

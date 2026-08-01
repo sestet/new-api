@@ -52,6 +52,7 @@ const defaultBillingSettings: BillingSettings = {
   GroupSpecialUsableGroup: '{}',
   UserUsableGroups: '{"default":"Default group"}',
   AutoGroups: '["default"]',
+  MaxTokenAutoGroups: 5,
   DefaultUseAutoGroup: false,
   ExposeRatioEnabled: false,
   'billing_setting.billing_mode': '{}',

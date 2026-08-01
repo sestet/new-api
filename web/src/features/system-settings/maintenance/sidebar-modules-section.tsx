@@ -94,7 +94,9 @@ export function SidebarModulesSection({
       },
       gptImagePlayground: {
         title: t('Image Playground'),
-        description: t('Generate and edit images through your New API channels.'),
+        description: t(
+          'Generate and edit images through your New API channels.'
+        ),
       },
       chat: {
         title: t('Chat'),

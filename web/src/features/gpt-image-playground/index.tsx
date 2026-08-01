@@ -52,9 +52,7 @@ export function GptImagePlayground() {
             {t('Image Playground')}
           </h1>
           <p className='text-muted-foreground hidden text-xs sm:block'>
-            {t(
-              'Generate and edit images through your New API channels.'
-            )}
+            {t('Generate and edit images through your New API channels.')}
           </p>
         </div>
         <PlaygroundTokenSelector />

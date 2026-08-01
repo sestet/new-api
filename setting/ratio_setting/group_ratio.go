@@ -28,6 +28,13 @@ func GetGroupRatioCopy() map[string]float64 {
 	return groupRatioMap.ReadAll()
 }
 
+func ContainsGroupRatio(name string) bool {
+	groupRatioSettingsMutex.RLock()
+	defer groupRatioSettingsMutex.RUnlock()
+	_, ok := groupRatioMap.Get(name)
+	return ok
+}
+
 func GroupRatio2JSONString() string {
 	groupRatioSettingsMutex.RLock()
 	defer groupRatioSettingsMutex.RUnlock()

@@ -7,11 +7,12 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
-	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
-	"github.com/QuantumNous/new-api/types"
+	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/relaykit/types"
+	hosttypes "github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
 )
@@ -33,7 +34,7 @@ func attachQuotaSaturationToOther(other map[string]interface{}, clamp *common.Qu
 	adminInfo["quota_saturation"] = clamp.AuditMap()
 }
 
-func AttachGroupRatioAudit(other map[string]interface{}, userGroup, usingGroup string, ratioInfo types.GroupRatioInfo) {
+func AttachGroupRatioAudit(other map[string]interface{}, userGroup, usingGroup string, ratioInfo hosttypes.GroupRatioInfo) {
 	if other == nil || ratioInfo.Source == "" {
 		return
 	}
@@ -351,7 +352,7 @@ func GenerateClaudeOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo,
 	return info
 }
 
-func GenerateMjOtherInfo(relayInfo *relaycommon.RelayInfo, priceData types.PriceData) map[string]interface{} {
+func GenerateMjOtherInfo(relayInfo *relaycommon.RelayInfo, priceData hosttypes.PriceData) map[string]interface{} {
 	other := make(map[string]interface{})
 	other["model_price"] = priceData.ModelPrice
 	appendRequestPath(nil, relayInfo, other)

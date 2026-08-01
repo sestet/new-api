@@ -83,6 +83,7 @@ type GroupBillingSectionProps = {
     GroupSpecialUsableGroup: string
     UserUsableGroups: string
     AutoGroups: string
+    MaxTokenAutoGroups: number
     DefaultUseAutoGroup: boolean
   }
 }
@@ -441,6 +442,28 @@ export function GroupBillingSection(props: GroupBillingSectionProps) {
                 </TableBody>
               </Table>
             </div>
+            <FormField
+              control={form.control}
+              name='maxTokenAutoGroups'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>{t('Maximum Auto groups per API key')}</FormLabel>
+                  <FormControl>
+                    <Input
+                      type='number'
+                      min='1'
+                      step='1'
+                      value={String(field.value ?? '')}
+                      onChange={field.onChange}
+                      onBlur={field.onBlur}
+                      name={field.name}
+                      ref={field.ref}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
             <FormField
               control={form.control}
               name='defaultUseAutoGroup'

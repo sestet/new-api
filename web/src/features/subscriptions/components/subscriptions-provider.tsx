@@ -52,7 +52,8 @@ export function SubscriptionsProvider({
   const { data } = useSystemOptions()
   const complianceOptions = getOptionValue(data?.data, {
     'payment_setting.compliance_confirmed': true,
-    'payment_setting.compliance_terms_version': CURRENT_COMPLIANCE_TERMS_VERSION,
+    'payment_setting.compliance_terms_version':
+      CURRENT_COMPLIANCE_TERMS_VERSION,
   })
   const complianceConfirmed =
     complianceOptions['payment_setting.compliance_confirmed'] &&

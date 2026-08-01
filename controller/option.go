@@ -11,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/console_setting"
+	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
@@ -126,6 +127,7 @@ type GroupRatioOptionsRequest struct {
 	GroupSpecialUsableGroup string `json:"group_special_usable_group"`
 	UserUsableGroups        string `json:"user_usable_groups"`
 	AutoGroups              string `json:"auto_groups"`
+	MaxTokenAutoGroups      int    `json:"max_token_auto_groups"`
 	DefaultUseAutoGroup     bool   `json:"default_use_auto_group"`
 }
 
@@ -152,6 +154,13 @@ func UpdateGroupRatioOptions(c *gin.Context) {
 		return
 	}
 	if err := setting.CheckAutoGroups(request.AutoGroups); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if request.MaxTokenAutoGroups == 0 {
+		request.MaxTokenAutoGroups = setting.GetMaxTokenAutoGroups()
+	}
+	if err := setting.ValidateMaxTokenAutoGroups(strconv.Itoa(request.MaxTokenAutoGroups)); err != nil {
 		common.ApiError(c, err)
 		return
 	}
@@ -228,6 +237,7 @@ func UpdateGroupRatioOptions(c *gin.Context) {
 		"GroupSpecialUsableGroup": request.GroupSpecialUsableGroup,
 		"UserUsableGroups":        request.UserUsableGroups,
 		"AutoGroups":              request.AutoGroups,
+		"MaxTokenAutoGroups":      strconv.Itoa(request.MaxTokenAutoGroups),
 		"DefaultUseAutoGroup":     strconv.FormatBool(request.DefaultUseAutoGroup),
 	}); err != nil {
 		common.ApiError(c, err)
@@ -367,6 +377,33 @@ func UpdateOption(c *gin.Context) {
 	case "UserUsableGroups":
 		if err = setting.CheckUserUsableGroups(option.Value.(string)); err != nil {
 			common.ApiError(c, err)
+			return
+		}
+	case "gemini.safety_settings":
+		err = model_setting.ValidateGeminiSafetySettings(option.Value.(string))
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
+			return
+		}
+	case "claude.default_max_tokens":
+		err = model_setting.ValidateClaudeDefaultMaxTokens(option.Value.(string))
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
+			return
+		}
+	case operation_setting.ToolPriceOptionKey:
+		err = operation_setting.ValidateToolPricesJSON(option.Value.(string))
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
 			return
 		}
 	case "ImageRatio":

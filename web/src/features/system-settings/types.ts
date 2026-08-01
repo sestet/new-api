@@ -45,6 +45,7 @@ export type UpdateGroupRatioOptionsRequest = {
   group_special_usable_group: string
   user_usable_groups: string
   auto_groups: string
+  max_token_auto_groups: number
   default_use_auto_group: boolean
 }
 
@@ -145,6 +146,7 @@ export type AuthSettings = {
   'discord.client_id': string
   'discord.client_secret': string
   'oidc.enabled': boolean
+  'oidc.display_name': string
   'oidc.client_id': string
   'oidc.client_secret': string
   'oidc.well_known': string
@@ -274,6 +276,7 @@ export type BillingSettings = {
   GroupSpecialUsableGroup: string
   UserUsableGroups: string
   AutoGroups: string
+  MaxTokenAutoGroups: number
   DefaultUseAutoGroup: boolean
   ExposeRatioEnabled: boolean
   'billing_setting.billing_mode': string

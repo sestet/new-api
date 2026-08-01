@@ -47,13 +47,16 @@ func TestGetUserUsableGroupsKeepsUsersOwnGroupAvailable(t *testing.T) {
 func TestGetUserAutoGroupPreservesConfiguredUsableOrder(t *testing.T) {
 	originalAutoGroups := setting.AutoGroups2JsonString()
 	originalUsableGroups := setting.UserUsableGroups2JSONString()
+	originalGroupRatios := ratio_setting.GroupRatio2JSONString()
 	t.Cleanup(func() {
 		require.NoError(t, setting.UpdateAutoGroupsByJsonString(originalAutoGroups))
 		require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(originalUsableGroups))
+		require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(originalGroupRatios))
 	})
 
 	require.NoError(t, setting.UpdateAutoGroupsByJsonString(`["premium","hidden","default"]`))
 	require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(`{"default":"Default","premium":"Premium"}`))
+	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"default":1,"premium":1}`))
 
 	assert.Equal(t, []string{"premium", "default"}, GetUserAutoGroup("default"))
 }

@@ -44,17 +44,28 @@
 }
 
 @keyframes gpt-playground-toast-enter {
-  from { transform: translate(-50%, 16px); opacity: 0; }
-  to { transform: translate(-50%, 0); opacity: 1; }
+  from {
+    transform: translate(-50%, 16px);
+    opacity: 0;
+  }
+  to {
+    transform: translate(-50%, 0);
+    opacity: 1;
+  }
 }
 
 .gpt-image-playground .toast-enter {
-  animation: gpt-playground-toast-enter 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: gpt-playground-toast-enter 0.3s cubic-bezier(0.16, 1, 0.3, 1)
+    forwards;
 }
 
 @keyframes gpt-playground-overlay-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .gpt-image-playground .animate-overlay-in {
@@ -62,8 +73,14 @@
 }
 
 @keyframes gpt-playground-modal-in {
-  from { opacity: 0; transform: scale(0.95) translateY(10px); }
-  to { opacity: 1; transform: scale(1) translateY(0); }
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
 }
 
 .gpt-image-playground .animate-modal-in {
@@ -71,8 +88,12 @@
 }
 
 @keyframes gpt-playground-fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .gpt-image-playground .animate-fade-in {
@@ -80,8 +101,14 @@
 }
 
 @keyframes gpt-playground-zoom-in {
-  from { opacity: 0; transform: scale(0.9); }
-  to { opacity: 1; transform: scale(1); }
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 .gpt-image-playground .animate-zoom-in {
@@ -92,7 +119,9 @@
   display: grid;
   grid-template-rows: 1fr;
   opacity: 1;
-  transition: grid-template-rows 0.25s ease-out, opacity 0.2s ease-out;
+  transition:
+    grid-template-rows 0.25s ease-out,
+    opacity 0.2s ease-out;
 }
 
 .gpt-image-playground .collapse-section.collapsed {
@@ -115,16 +144,36 @@
   white-space: normal;
 }
 
-.gpt-image-playground .markdown-renderer :where(p, ul, ol, blockquote, table, pre, [data-streamdown='code-block']) {
+.gpt-image-playground
+  .markdown-renderer
+  :where(p, ul, ol, blockquote, table, pre, [data-streamdown='code-block']) {
   margin-top: 0.65rem;
   margin-bottom: 0.65rem;
 }
 
-.gpt-image-playground .markdown-renderer :where(p:first-child, ul:first-child, ol:first-child, blockquote:first-child, table:first-child, pre:first-child) {
+.gpt-image-playground
+  .markdown-renderer
+  :where(
+    p:first-child,
+    ul:first-child,
+    ol:first-child,
+    blockquote:first-child,
+    table:first-child,
+    pre:first-child
+  ) {
   margin-top: 0;
 }
 
-.gpt-image-playground .markdown-renderer :where(p:last-child, ul:last-child, ol:last-child, blockquote:last-child, table:last-child, pre:last-child) {
+.gpt-image-playground
+  .markdown-renderer
+  :where(
+    p:last-child,
+    ul:last-child,
+    ol:last-child,
+    blockquote:last-child,
+    table:last-child,
+    pre:last-child
+  ) {
   margin-bottom: 0;
 }
 

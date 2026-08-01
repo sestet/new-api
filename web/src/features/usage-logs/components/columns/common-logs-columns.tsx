@@ -69,6 +69,7 @@ import {
 } from '../../lib/utils'
 import type { LogOtherData } from '../../types'
 import { DetailsDialog } from '../dialogs/details-dialog'
+import { LogCostDisplay } from '../log-cost-display'
 import { ModelBadge } from '../model-badge'
 import { TimingMetricsCell, StreamTpsCell } from '../timing-metrics-cell'
 import { useUsageLogsContext } from '../usage-logs-provider'
@@ -77,12 +78,6 @@ interface DetailSegment {
   text: string
   muted?: boolean
   danger?: boolean
-}
-
-function splitQuotaDisplay(value: string): { prefix: string; amount: string } {
-  const match = value.match(/^([^0-9+\-.,\s]+)(.+)$/)
-  if (!match) return { prefix: '', amount: value }
-  return { prefix: match[1], amount: match[2] }
 }
 
 function buildDetailSegments(
@@ -706,23 +701,12 @@ export function useCommonLogsColumns(
 
         const quota = row.getValue('quota') as number
         const other = parseLogOther(log.other)
-        const isSubscription = other?.billing_source === 'subscription'
         const billingStatus = getUpstreamBillingStatusPresentation(
           other?.upstream_billing_status
         )
         const adjustmentQuota =
           other?.admin_info?.upstream_billing?.adjustment_quota ?? 0
         const billingBreakdown = getAdminBillingBreakdown(other, isAdmin)
-        const quotaStr = formatLogQuota(quota)
-        const quotaDisplay = splitQuotaDisplay(quotaStr)
-        const quotaBadge = (
-          <span className='border-border/80 bg-muted/60 inline-flex h-6 w-fit items-center rounded-md border px-2 [font-family:var(--font-body)] text-sm leading-none font-semibold tabular-nums'>
-            {quotaDisplay.prefix && (
-              <span className='mr-1'>{quotaDisplay.prefix}</span>
-            )}
-            <span>{quotaDisplay.amount}</span>
-          </span>
-        )
         const billingStatusBadge = billingStatus ? (
           <StatusBadge
             label={t(billingStatus.labelKey)}
@@ -772,27 +756,9 @@ export function useCommonLogsColumns(
             </div>
           ) : null
 
-        if (isSubscription) {
-          return (
-            <div className='flex flex-col items-start gap-0.5'>
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger
-                    render={<span className='cursor-help'>{quotaBadge}</span>}
-                  />
-                  <TooltipContent>
-                    <span>{t('Deducted by subscription')}</span>
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-              {billingMeta}
-            </div>
-          )
-        }
-
         return (
           <div className='flex flex-col items-start gap-0.5'>
-            {quotaBadge}
+            <LogCostDisplay quota={quota} other={other} />
             {billingMeta}
             {adjustmentQuota !== 0 && (
               <span

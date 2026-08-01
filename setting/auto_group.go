@@ -1,17 +1,27 @@
 package setting
 
 import (
-	"errors"
+	"fmt"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/QuantumNous/new-api/common"
 )
+
+const DefaultMaxTokenAutoGroups = 5
 
 var autoGroups = []string{"default"}
 var autoGroupsMutex sync.RWMutex
 
 var DefaultUseAutoGroup = false
+
+var maxTokenAutoGroups atomic.Int64
+
+func init() {
+	maxTokenAutoGroups.Store(DefaultMaxTokenAutoGroups)
+}
 
 func ContainsAutoGroup(group string) bool {
 	autoGroupsMutex.RLock()
@@ -57,18 +67,36 @@ func CheckAutoGroups(jsonString string) error {
 	if err := common.UnmarshalJsonStr(jsonString, &groups); err != nil {
 		return err
 	}
-	if len(groups) == 0 {
-		return errors.New("at least one auto group is required")
-	}
 	seen := make(map[string]struct{}, len(groups))
 	for _, group := range groups {
 		if strings.TrimSpace(group) == "" {
-			return errors.New("auto group name cannot be empty")
+			return fmt.Errorf("auto group name cannot be empty")
 		}
 		if _, exists := seen[group]; exists {
-			return errors.New("auto groups must be unique: " + group)
+			return fmt.Errorf("auto groups must be unique: %s", group)
 		}
 		seen[group] = struct{}{}
 	}
+	return nil
+}
+
+func GetMaxTokenAutoGroups() int {
+	return int(maxTokenAutoGroups.Load())
+}
+
+func ValidateMaxTokenAutoGroups(value string) error {
+	maxCount, err := strconv.Atoi(value)
+	if err != nil || maxCount <= 0 {
+		return fmt.Errorf("MaxTokenAutoGroups must be a positive integer")
+	}
+	return nil
+}
+
+func UpdateMaxTokenAutoGroups(value string) error {
+	if err := ValidateMaxTokenAutoGroups(value); err != nil {
+		return err
+	}
+	maxCount, _ := strconv.Atoi(value)
+	maxTokenAutoGroups.Store(int64(maxCount))
 	return nil
 }

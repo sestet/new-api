@@ -39,7 +39,11 @@ describe('Image Playground layout', () => {
 
     assert.ok(taskContentClasses.includes('py-3'))
     assert.ok(taskContentClasses.includes('gap-4'))
-    assert.ok(!searchControlClasses.some((className) => className.startsWith('mt-')))
-    assert.ok(!searchControlClasses.some((className) => className.startsWith('mb-')))
+    assert.ok(
+      !searchControlClasses.some((className) => className.startsWith('mt-'))
+    )
+    assert.ok(
+      !searchControlClasses.some((className) => className.startsWith('mb-'))
+    )
   })
 })

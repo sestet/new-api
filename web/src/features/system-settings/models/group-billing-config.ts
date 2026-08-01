@@ -61,6 +61,11 @@ export const groupBillingSchema = z
         })
       )
       .min(1, 'At least one group is required'),
+    maxTokenAutoGroups: z.coerce
+      .number()
+      .int('Enter a positive integer')
+      .min(1, 'Enter a positive integer')
+      .default(5),
     defaultUseAutoGroup: z.boolean(),
   })
   .superRefine((values, context) => {
@@ -188,6 +193,7 @@ export function parseGroupBillingDefaults(defaults: {
   GroupSpecialUsableGroup: string
   UserUsableGroups: string
   AutoGroups: string
+  MaxTokenAutoGroups?: number
   DefaultUseAutoGroup: boolean
 }): GroupBillingFormInput {
   const rawRatios = parseRecord(defaults.GroupRatio)
@@ -297,6 +303,11 @@ export function parseGroupBillingDefaults(defaults: {
     overrides,
     specialUsableRules,
     autoGroups: autoGroupNames.map((group) => ({ group })),
+    maxTokenAutoGroups:
+      Number.isInteger(defaults.MaxTokenAutoGroups) &&
+      (defaults.MaxTokenAutoGroups ?? 0) > 0
+        ? defaults.MaxTokenAutoGroups
+        : 5,
     defaultUseAutoGroup: defaults.DefaultUseAutoGroup,
   }
 }
@@ -338,6 +349,7 @@ export function serializeGroupBillingValues(
     auto_groups: JSON.stringify(
       values.autoGroups.map((autoGroup) => autoGroup.group)
     ),
+    max_token_auto_groups: values.maxTokenAutoGroups,
     default_use_auto_group: values.defaultUseAutoGroup,
   }
 }

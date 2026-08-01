@@ -10,11 +10,12 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/dto"
+	relaytypes "github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
-	"github.com/QuantumNous/new-api/types"
+	hosttypes "github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -61,10 +62,10 @@ func TestResolveUpstreamBillingQuotaUsesSub2APIActualCost(t *testing.T) {
 	ctx.Set(common.UpstreamBillingRequestIdKey, "local-request")
 	info := &relaycommon.RelayInfo{
 		RequestId:   "local-request",
-		RelayFormat: types.RelayFormatOpenAI,
+		RelayFormat: relaytypes.RelayFormatOpenAI,
 		UserGroup:   "standard",
 		UsingGroup:  "premium",
-		PriceData: types.PriceData{GroupRatioInfo: types.GroupRatioInfo{
+		PriceData: hosttypes.PriceData{GroupRatioInfo: hosttypes.GroupRatioInfo{
 			GroupRatio: 2,
 			Source:     "group_group_ratio",
 		}},
@@ -120,7 +121,7 @@ func TestApplyUpstreamCostRateToEstimatedQuota(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			info := &relaycommon.RelayInfo{
-				RelayFormat: types.RelayFormatOpenAI,
+				RelayFormat: relaytypes.RelayFormatOpenAI,
 				ChannelMeta: &relaycommon.ChannelMeta{ChannelOtherSettings: dto.ChannelOtherSettings{
 					UpstreamBilling: &dto.UpstreamBillingSettings{
 						Enabled:            true,
@@ -139,7 +140,7 @@ func TestApplyUpstreamCostRateToEstimatedQuota(t *testing.T) {
 
 func TestApplyUpstreamCostRateLeavesUnsupportedRelayUnchanged(t *testing.T) {
 	info := &relaycommon.RelayInfo{
-		RelayFormat: types.RelayFormatOpenAIRealtime,
+		RelayFormat: relaytypes.RelayFormatOpenAIRealtime,
 		ChannelMeta: &relaycommon.ChannelMeta{ChannelOtherSettings: dto.ChannelOtherSettings{
 			UpstreamBilling: &dto.UpstreamBillingSettings{
 				Enabled:            true,
@@ -159,7 +160,7 @@ func TestUpstreamCostRateRaisesPostChannelReservation(t *testing.T) {
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	billing := &recordingBillingSettler{}
 	info := &relaycommon.RelayInfo{
-		RelayFormat: types.RelayFormatOpenAI,
+		RelayFormat: relaytypes.RelayFormatOpenAI,
 		Billing:     billing,
 		ChannelMeta: &relaycommon.ChannelMeta{ChannelOtherSettings: dto.ChannelOtherSettings{
 			UpstreamBilling: &dto.UpstreamBillingSettings{
@@ -182,7 +183,7 @@ func TestUpstreamCostRateOverflowIsRejectedBeforeReservation(t *testing.T) {
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	billing := &recordingBillingSettler{}
 	info := &relaycommon.RelayInfo{
-		RelayFormat: types.RelayFormatOpenAI,
+		RelayFormat: relaytypes.RelayFormatOpenAI,
 		Billing:     billing,
 		ChannelMeta: &relaycommon.ChannelMeta{ChannelOtherSettings: dto.ChannelOtherSettings{
 			UpstreamBilling: &dto.UpstreamBillingSettings{
@@ -198,7 +199,7 @@ func TestUpstreamCostRateOverflowIsRejectedBeforeReservation(t *testing.T) {
 	require.NotNil(t, apiErr)
 	require.NotNil(t, info.QuotaClamp)
 	assert.Equal(t, common.QuotaClampOverflow, info.QuotaClamp.Kind)
-	assert.Equal(t, types.ErrorCodeModelPriceError, apiErr.GetErrorCode())
+	assert.Equal(t, relaytypes.ErrorCodeModelPriceError, apiErr.GetErrorCode())
 	assert.Equal(t, http.StatusBadRequest, apiErr.StatusCode)
 	assert.Equal(t, 0, billing.reserveCalls)
 }
@@ -220,10 +221,10 @@ func TestResolveUpstreamBillingQuotaUsesDetectedRateOnlyForFallback(t *testing.T
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 	info := &relaycommon.RelayInfo{
 		RequestId:   "rate-fallback-request",
-		RelayFormat: types.RelayFormatOpenAIResponses,
+		RelayFormat: relaytypes.RelayFormatOpenAIResponses,
 		UserGroup:   "default",
 		UsingGroup:  "default",
-		PriceData: types.PriceData{GroupRatioInfo: types.GroupRatioInfo{
+		PriceData: hosttypes.PriceData{GroupRatioInfo: hosttypes.GroupRatioInfo{
 			GroupRatio: 1,
 			Source:     "group_ratio",
 		}},
@@ -368,7 +369,7 @@ func TestResolveUpstreamBillingQuotaContinuesAfterRequestContextCancellation(t *
 	ctx.Set(common.UpstreamRequestIdKey, "stream-request")
 	info := &relaycommon.RelayInfo{
 		RequestId:   "stream-local-request",
-		RelayFormat: types.RelayFormatOpenAI,
+		RelayFormat: relaytypes.RelayFormatOpenAI,
 		ChannelMeta: &relaycommon.ChannelMeta{
 			ChannelId:      0,
 			ChannelBaseUrl: server.URL,
@@ -1022,7 +1023,7 @@ func TestResolveUpstreamBillingQuotaClassifiesFallback(t *testing.T) {
 			ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 			info := &relaycommon.RelayInfo{
 				RequestId:   requestID,
-				RelayFormat: types.RelayFormatOpenAI,
+				RelayFormat: relaytypes.RelayFormatOpenAI,
 				ChannelMeta: &relaycommon.ChannelMeta{
 					ChannelId:      0,
 					ChannelBaseUrl: server.URL,
