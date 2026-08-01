@@ -97,6 +97,7 @@ export interface SearchApiKeysParams {
 
 export interface ApiKeyFormData {
   name: string
+  custom_key?: string
   remain_quota: number
   expired_time: number
   unlimited_quota: boolean

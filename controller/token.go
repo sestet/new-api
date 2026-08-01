@@ -34,6 +34,7 @@ func (input *tokenAutoGroupsInput) UnmarshalJSON(data []byte) error {
 type tokenRequest struct {
 	model.Token
 	AutoGroups tokenAutoGroupsInput `json:"auto_groups"`
+	CustomKey  *string              `json:"custom_key"`
 }
 
 type tokenResponse struct {
@@ -78,6 +79,24 @@ func validateTokenRateLimits(token *model.Token) error {
 		}
 	}
 	return nil
+}
+
+func normalizeCustomTokenKey(rawKey string) (string, string) {
+	key := strings.TrimSpace(rawKey)
+	key = strings.TrimPrefix(key, "sk-")
+	if len(key) < 16 || len(key) > 128 {
+		return "", i18n.MsgTokenCustomKeyLength
+	}
+	for _, char := range key {
+		if char >= 'a' && char <= 'z' ||
+			char >= 'A' && char <= 'Z' ||
+			char >= '0' && char <= '9' ||
+			char == '-' || char == '_' {
+			continue
+		}
+		return "", i18n.MsgTokenCustomKeyInvalidChars
+	}
+	return key, ""
 }
 
 func getTokenRequestUserGroup(c *gin.Context) (string, error) {
@@ -325,11 +344,30 @@ func AddToken(c *gin.Context) {
 		token.CrossGroupRetry = false
 		_ = token.SetAutoGroups(nil)
 	}
-	key, err := common.GenerateKey()
-	if err != nil {
-		common.ApiErrorI18n(c, i18n.MsgTokenGenerateFailed)
-		common.SysLog("failed to generate token key: " + err.Error())
-		return
+	var key string
+	if request.CustomKey != nil {
+		normalizedKey, errKey := normalizeCustomTokenKey(*request.CustomKey)
+		if errKey != "" {
+			common.ApiErrorI18n(c, errKey)
+			return
+		}
+		key = normalizedKey
+		exists, err := model.TokenKeyExists(key)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		if exists {
+			common.ApiErrorI18n(c, i18n.MsgTokenCustomKeyExists)
+			return
+		}
+	} else {
+		key, err = common.GenerateKey()
+		if err != nil {
+			common.ApiErrorI18n(c, i18n.MsgTokenGenerateFailed)
+			common.SysLog("failed to generate token key: " + err.Error())
+			return
+		}
 	}
 	cleanToken := model.Token{
 		UserId:             c.GetInt("id"),
@@ -350,10 +388,22 @@ func AddToken(c *gin.Context) {
 		RateLimit7d:        token.RateLimit7d,
 		AutoGroups:         token.AutoGroups,
 	}
-	err = cleanToken.Insert()
-	if err != nil {
-		common.ApiError(c, err)
-		return
+	if request.CustomKey != nil {
+		inserted, err := cleanToken.InsertIfKeyAvailable()
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		if !inserted {
+			common.ApiErrorI18n(c, i18n.MsgTokenCustomKeyExists)
+			return
+		}
+	} else {
+		err = cleanToken.Insert()
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,

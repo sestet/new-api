@@ -284,6 +284,32 @@ after(() => {
 })
 
 describe('API keys mutate drawer Auto group integration', () => {
+  test('creates one custom API key and sends the entered value', async () => {
+    const createdPayloads: Array<Record<string, unknown>> = []
+    installApiFixtures(createdPayloads)
+    await renderCreateDrawer()
+
+    const customKeySwitch =
+      getControlByLabel<HTMLButtonElement>('Custom API Key')
+    await act(async () => customKeySwitch.click())
+
+    const customKeyInput = getControlByLabel<HTMLInputElement>('API Key value')
+    const quantityInput = getControlByLabel<HTMLInputElement>('Quantity')
+    assert.equal(quantityInput.disabled, true)
+    await changeInput(customKeyInput, 'sk-custom_key_1234567890')
+    await changeInput(getControlByLabel<HTMLInputElement>('Name'), 'custom-key')
+    await act(async () => findButton('Save changes', true).click())
+    await act(async () =>
+      waitForCondition(
+        () => createdPayloads.length === 1,
+        'custom API key was not created'
+      )
+    )
+
+    assert.equal(createdPayloads.length, 1)
+    assert.equal(createdPayloads[0]?.custom_key, 'sk-custom_key_1234567890')
+  })
+
   test('inherits the root Auto order and sends an empty override for every batch-created key', async () => {
     const createdPayloads: Array<Record<string, unknown>> = []
     installApiFixtures(createdPayloads)

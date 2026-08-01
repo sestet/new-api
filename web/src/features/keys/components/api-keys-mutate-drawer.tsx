@@ -259,6 +259,7 @@ export function ApiKeysMutateDrawer({
     isUpdate && currentRow ? `update:${currentRow.id}` : 'create'
   const isFormInitialized = initializedTarget === formTarget
   const selectedGroup = form.watch('group')
+  const useCustomKey = form.watch('use_custom_key')
 
   // Correct group after groups load: if the form value is not in available groups, fall back
   useEffect(() => {
@@ -573,6 +574,72 @@ export function ApiKeysMutateDrawer({
               {!isUpdate && (
                 <FormField
                   control={form.control}
+                  name='use_custom_key'
+                  render={({ field }) => (
+                    <FormItem className={sideDrawerSwitchItemClassName()}>
+                      <div className='flex flex-col gap-0.5'>
+                        <FormLabel className='text-sm'>
+                          {t('Custom API Key')}
+                        </FormLabel>
+                        <FormDescription className='text-xs'>
+                          {t(
+                            'Set a custom value instead of generating one automatically'
+                          )}
+                        </FormDescription>
+                      </div>
+                      <FormControl>
+                        <Switch
+                          checked={field.value}
+                          onCheckedChange={(checked) => {
+                            field.onChange(checked)
+                            if (checked) {
+                              form.setValue('tokenCount', 1, {
+                                shouldDirty: true,
+                                shouldValidate: true,
+                              })
+                            } else {
+                              form.setValue('custom_key', '', {
+                                shouldDirty: true,
+                                shouldValidate: true,
+                              })
+                            }
+                          }}
+                        />
+                      </FormControl>
+                    </FormItem>
+                  )}
+                />
+              )}
+
+              {!isUpdate && useCustomKey && (
+                <FormField
+                  control={form.control}
+                  name='custom_key'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('API Key value')}</FormLabel>
+                      <FormControl>
+                        <Input
+                          {...field}
+                          autoComplete='off'
+                          className='font-mono'
+                          placeholder={t('Enter a custom API Key')}
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        {t(
+                          'Use 16-128 letters, numbers, hyphens, or underscores. The sk- prefix is optional.'
+                        )}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
+
+              {!isUpdate && (
+                <FormField
+                  control={form.control}
                   name='tokenCount'
                   render={({ field }) => (
                     <FormItem>
@@ -582,6 +649,7 @@ export function ApiKeysMutateDrawer({
                           {...field}
                           type='number'
                           min='1'
+                          disabled={useCustomKey}
                           placeholder={t('Number of keys to create')}
                           onChange={(e) =>
                             field.onChange(
@@ -591,9 +659,13 @@ export function ApiKeysMutateDrawer({
                         />
                       </FormControl>
                       <FormDescription>
-                        {t(
-                          'Create multiple API keys at once (random suffix will be added to names)'
-                        )}
+                        {useCustomKey
+                          ? t(
+                              'Custom API keys can only be created one at a time'
+                            )
+                          : t(
+                              'Create multiple API keys at once (random suffix will be added to names)'
+                            )}
                       </FormDescription>
                       <FormMessage />
                     </FormItem>

@@ -48,6 +48,8 @@ export function getApiKeyFormSchema(t: TFunction, maxAutoGroups = 5) {
       auto_groups: z.array(z.string()),
       cross_group_retry: z.boolean().optional(),
       tokenCount: z.number().min(1).optional(),
+      use_custom_key: z.boolean(),
+      custom_key: z.string(),
     })
     .superRefine((data, ctx) => {
       if (data.group === 'auto') {
@@ -79,6 +81,41 @@ export function getApiKeyFormSchema(t: TFunction, maxAutoGroups = 5) {
             code: 'custom',
             path: ['auto_groups'],
             message: t('Auto groups must not contain duplicates'),
+          })
+        }
+      }
+
+      if (data.use_custom_key) {
+        const customKey = data.custom_key.trim().replace(/^sk-/, '')
+        if (customKey.length === 0) {
+          ctx.addIssue({
+            code: 'custom',
+            path: ['custom_key'],
+            message: t('Custom API Key is required'),
+          })
+        } else if (customKey.length < 16 || customKey.length > 128) {
+          ctx.addIssue({
+            code: 'custom',
+            path: ['custom_key'],
+            message: t(
+              'Custom API Key must be 16-128 characters after the sk- prefix'
+            ),
+          })
+        } else if (!/^[a-zA-Z0-9_-]+$/.test(customKey)) {
+          ctx.addIssue({
+            code: 'custom',
+            path: ['custom_key'],
+            message: t(
+              'Custom API Key can only contain letters, numbers, hyphens, and underscores'
+            ),
+          })
+        }
+
+        if ((data.tokenCount ?? 1) !== 1) {
+          ctx.addIssue({
+            code: 'custom',
+            path: ['tokenCount'],
+            message: t('Custom API keys can only be created one at a time'),
           })
         }
       }
@@ -121,6 +158,8 @@ export const API_KEY_FORM_DEFAULT_VALUES: ApiKeyFormValues = {
   auto_groups: [],
   cross_group_retry: true,
   tokenCount: 1,
+  use_custom_key: false,
+  custom_key: '',
 }
 
 export function getApiKeyFormDefaultValues(
@@ -147,6 +186,7 @@ export function transformFormDataToPayload(
 ): ApiKeyFormData {
   return {
     name: data.name,
+    ...(data.use_custom_key ? { custom_key: data.custom_key.trim() } : {}),
     remain_quota: data.unlimited_quota
       ? 0
       : parseQuotaFromDollars(data.remain_quota_dollars || 0),
@@ -206,5 +246,7 @@ export function transformApiKeyToFormDefaults(
     rate_limit_1d_dollars: quotaUnitsToDollars(apiKey.rate_limit_1d),
     rate_limit_7d_dollars: quotaUnitsToDollars(apiKey.rate_limit_7d),
     tokenCount: 1,
+    use_custom_key: false,
+    custom_key: '',
   }
 }

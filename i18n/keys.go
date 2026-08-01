@@ -60,6 +60,12 @@ const (
 	MsgTokenAutoGroupsInvalid    = "token.auto_groups_invalid"
 )
 
+const (
+	MsgTokenCustomKeyLength       = "token.custom_key_length"
+	MsgTokenCustomKeyInvalidChars = "token.custom_key_invalid_chars"
+	MsgTokenCustomKeyExists       = "token.custom_key_exists"
+)
+
 // Redemption related messages
 const (
 	MsgRedemptionNameLength        = "redemption.name_length"

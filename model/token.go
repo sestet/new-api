@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/bytedance/gopkg/util/gopool"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type Token struct {
@@ -369,10 +370,24 @@ func GetTokenByKey(key string, fromDB bool) (token *Token, err error) {
 	return token, err
 }
 
+func TokenKeyExists(key string) (bool, error) {
+	var count int64
+	err := DB.Unscoped().Model(&Token{}).Where(&Token{Key: key}).Count(&count).Error
+	return count > 0, err
+}
+
 func (token *Token) Insert() error {
 	var err error
 	err = DB.Create(token).Error
 	return err
+}
+
+func (token *Token) InsertIfKeyAvailable() (bool, error) {
+	result := DB.Clauses(clause.OnConflict{DoNothing: true}).Create(token)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected == 1, nil
 }
 
 // Update Make sure your token's fields is completed, because this will update non-zero values

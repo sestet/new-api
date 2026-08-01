@@ -50,6 +50,9 @@ token.db_error: "Invalid token, database query error, please contact administrat
 token.auto_groups_too_many: "A token can select at most {{.Max}} Auto groups"
 token.auto_groups_duplicate: "Auto group {{.Group}} is duplicated"
 token.auto_groups_invalid: "Auto group {{.Group}} is unavailable or unauthorized"
+token.custom_key_length: "Custom API Key must be 16 to 128 characters after the sk- prefix"
+token.custom_key_invalid_chars: "Custom API Key can only contain letters, numbers, hyphens, and underscores"
+token.custom_key_exists: "This API Key already exists"
 
 # Redemption messages
 redemption.name_length: "Redemption code name length must be between 1-20"

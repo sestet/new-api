@@ -51,6 +51,9 @@ token.db_error: "无效的令牌，数据库查询出错，请联系管理员"
 token.auto_groups_too_many: "每个令牌最多可选择 {{.Max}} 个 Auto 分组"
 token.auto_groups_duplicate: "Auto 分组 {{.Group}} 重复"
 token.auto_groups_invalid: "Auto 分组 {{.Group}} 不可用或无权访问"
+token.custom_key_length: "自定义 API Key 去掉 sk- 前缀后必须为 16 到 128 位"
+token.custom_key_invalid_chars: "自定义 API Key 只能包含字母、数字、连字符和下划线"
+token.custom_key_exists: "该 API Key 已存在"
 
 # Redemption messages
 redemption.name_length: "兑换码名称长度必须在1-20之间"
